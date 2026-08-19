@@ -1,0 +1,2378 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Poranek Zuzi</title>
+<meta name="description" content="Ośmiobitowa gra 2D dla dzieci: poranek Zuzi – od wstawania, przez obowiązki domowe, aż do szkoły.">
+<!-- PWA: da się zainstalować na pulpicie i chodzi na pełnym ekranie -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0000bc">
+<link rel="icon" href="ikona-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Poranek Zuzi">
+<style>
+  html,body{margin:0;padding:0;height:100%;background:#0b0c14;overflow:hidden;
+    font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;-webkit-user-select:none;user-select:none;}
+  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;}
+  canvas{width:min(100vw, calc(100vh * 16 / 9));height:auto;aspect-ratio:16/9;
+    image-rendering:pixelated;image-rendering:crisp-edges;
+    box-shadow:0 0 0 4px #1a1c2c, 0 0 60px rgba(0,0,0,.8);touch-action:none;display:block;}
+  canvas:focus{outline:3px solid #f8d878;outline-offset:6px;}
+  /* Przyciski dotykowe leżą na sztywnych pozycjach, bo w niektórych etapach
+     ◀ i ▶ rozjeżdżają się do obu krawędzi – wtedy gra się dwoma kciukami. */
+  #dotyk{position:fixed;inset:0;display:none;pointer-events:none;
+    --bw:78px; --pad:18px; --luz:12px;}
+  #dotyk button{position:absolute;bottom:calc(var(--pad) - 4px);pointer-events:auto;
+    width:var(--bw);height:var(--bw);border-radius:10px;border:3px solid #fffeff;
+    font-size:32px;color:#fffeff;background:rgba(0,0,0,.45);font-family:monospace;}
+  #dotyk button:active{background:rgba(248,216,120,.6);}
+  body.dotyk #dotyk{display:block;}
+  /* domyślnie: chodzenie po lewej pod jednym kciukiem, skok po prawej */
+  #dotyk button[data-k="ArrowLeft"] {left:var(--pad);}
+  #dotyk button[data-k="ArrowRight"]{left:calc(var(--pad) + var(--bw) + var(--luz));}
+  #dotyk button[data-k="ArrowUp"]   {right:var(--pad);}
+  #dotyk button[data-k="ArrowDown"] {right:calc(var(--pad) + var(--bw) + var(--luz));}
+  /* ▼ zmienia pas tylko w samochodzie, a strefę tylko przy myciu ząbków */
+  #dotyk button[data-k="ArrowDown"]{display:none;}
+  body.wAucie #dotyk button[data-k="ArrowDown"],
+  body.strefy #dotyk button[data-k="ArrowDown"]{display:block;}
+  /* etapy „na dwa kciuki" (wyścigi, szorowanie, sikanie, wstawanie, światło):
+     ◀ przy lewej krawędzi, ▶ przy prawej, a ▲ ▼ na środku pod spodem */
+  body.dwaKciuki #dotyk button[data-k="ArrowRight"]{left:auto;right:var(--pad);}
+  body.dwaKciuki #dotyk button[data-k="ArrowUp"]{right:auto;left:50%;
+    margin-left:calc(var(--luz) / 2);}
+  body.dwaKciuki #dotyk button[data-k="ArrowDown"]{right:auto;left:50%;
+    margin-left:calc(-1 * var(--bw) - var(--luz) / 2);}
+  body.dwaKciuki:not(.strefy) #dotyk button[data-k="ArrowUp"]{margin-left:calc(var(--bw) / -2);}
+  #glosnik{position:fixed;top:10px;right:12px;width:44px;height:44px;border:3px solid #fffeff;
+    border-radius:8px;background:rgba(0,0,0,.5);color:#fffeff;font-size:20px;cursor:pointer;}
+
+  /* --- telefon trzymany pionowo: poproś o obrót --- */
+  #obroc{position:fixed;inset:0;z-index:99;display:none;flex-direction:column;
+    align-items:center;justify-content:center;gap:26px;padding:24px;box-sizing:border-box;
+    background:#0000bc;color:#fffeff;text-align:center;
+    font-family:ui-monospace,Menlo,Consolas,monospace;}
+  #obroc .telefon{width:76px;height:130px;border:6px solid #fffeff;border-radius:10px;
+    position:relative;animation:obrotFazy 2.4s ease-in-out infinite;}
+  #obroc .telefon::after{content:"";position:absolute;left:50%;bottom:6px;transform:translateX(-50%);
+    width:26px;height:4px;background:#fffeff;border-radius:2px;}
+  #obroc h1{font-size:20px;margin:0;line-height:1.5;letter-spacing:1px;color:#f8d878;}
+  #obroc p{font-size:13px;margin:0;line-height:1.6;color:#c0dfff;max-width:22em;}
+  @keyframes obrotFazy{
+    0%,30%{transform:rotate(0deg);} 55%,85%{transform:rotate(-90deg);} 100%{transform:rotate(0deg);}
+  }
+  @media (prefers-reduced-motion: reduce){ #obroc .telefon{animation:none;transform:rotate(-90deg);} }
+  @media (orientation: portrait) and (pointer: coarse){
+    #obroc{display:flex;}
+    #wrap,#dotyk,#glosnik{display:none !important;}
+  }
+  /* zapas dla urządzeń, które raportują rysik jako „pointer: fine" */
+  @media (orientation: portrait) and (hover: none){
+    #obroc{display:flex;}
+    #wrap,#dotyk,#glosnik{display:none !important;}
+  }
+  /* --- instalacja na pulpicie --- */
+  #instaluj{position:fixed;top:10px;left:12px;z-index:100;display:none;
+    padding:9px 13px;border:3px solid #fffeff;border-radius:8px;background:#0000bc;color:#f8d878;
+    font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;letter-spacing:1px;cursor:pointer;}
+  #instaluj:active{background:#a80020;}
+  body.mozna.wMenu #instaluj{display:block;}
+  #jakInstalowac{position:fixed;inset:0;z-index:101;display:none;align-items:center;justify-content:center;
+    padding:20px;box-sizing:border-box;background:rgba(0,0,0,.8);
+    font-family:ui-monospace,Menlo,Consolas,monospace;}
+  #jakInstalowac.widac{display:flex;}
+  #jakInstalowac .pudlo{background:#0000bc;border:4px solid #fffeff;border-radius:10px;
+    padding:22px;max-width:30em;color:#c0dfff;text-align:center;}
+  #jakInstalowac h2{margin:0 0 14px;font-size:16px;color:#f8d878;letter-spacing:1px;}
+  #jakInstalowac p{margin:0 0 16px;font-size:13px;line-height:1.7;}
+  #jakInstalowac b{color:#fffeff;}
+  #jakInstalowac button{padding:9px 20px;border:3px solid #fffeff;border-radius:8px;
+    background:#a80020;color:#fffeff;font-family:inherit;font-size:13px;letter-spacing:1px;cursor:pointer;}
+  /* telefon pionowo: gra jest schowana, więc przycisk instalacji na środku pod spodem */
+  @media (orientation: portrait) and (pointer: coarse){
+    body.mozna #instaluj{display:block;top:auto;bottom:22px;left:50%;transform:translateX(-50%);}
+  }
+  @media (orientation: portrait) and (hover: none){
+    body.mozna #instaluj{display:block;top:auto;bottom:22px;left:50%;transform:translateX(-50%);}
+  }
+  /* niskie ekrany (telefon poziomo) – mniejsze przyciski, żeby nie zasłaniały gry */
+  @media (pointer: coarse) and (max-height: 460px){
+    #dotyk{--bw:58px; --pad:12px; --luz:10px;}
+    #dotyk button{font-size:24px;opacity:.75;}
+    #glosnik{width:36px;height:36px;font-size:16px;top:6px;right:8px;}
+  }
+</style>
+</head>
+<body>
+<div id="obroc">
+  <div class="telefon"></div>
+  <h1>OBRÓĆ TELEFON<br>POZIOMO</h1>
+  <p>Gra działa na leżąco.<br>Dotknij ekranu, żeby włączyć pełny ekran.</p>
+</div>
+<div id="wrap"><canvas id="c" width="480" height="270" tabindex="0"></canvas></div>
+<button id="glosnik" title="Dźwięk włącz/wyłącz">🔊</button>
+<button id="instaluj">📲 ZAINSTALUJ GRĘ</button>
+<div id="jakInstalowac">
+  <div class="pudlo">
+    <h2>GRA NA PULPICIE</h2>
+    <p id="jakTresc"></p>
+    <button id="zamknijJak">DOBRA, ROZUMIEM</button>
+  </div>
+</div>
+<div id="dotyk">
+  <button data-k="ArrowLeft">◀</button><button data-k="ArrowRight">▶</button>
+  <button data-k="ArrowDown">▼</button><button data-k="ArrowUp">▲</button>
+</div>
+<script>
+"use strict";
+
+/* ======================================================================
+   PORANEK ZUZI — 8-bitowa gra 2D dla dzieci. Sterowanie: same strzałki.
+   Renderowanie: 480x270 pikseli, powiększane bez wygładzania.
+   Zuzia wstaje, karmi psa Jogiego, temperuje kredki, myje podłogę,
+   wyrzuca śmieci, podlewa kwiatki, przemyka obok śpiącego taty i leci
+   do szkoły.
+   ====================================================================== */
+
+/* --- USTAWIENIA, KTÓRE ŁATWO ZMIENIĆ ------------------------------- */
+const GLOSNOSC_MUZYKI = 0.30;
+const GLOSNOSC_NARRATORA = 1.0;
+const GLOSNOSC_EFEKTOW = 0.5;
+/* ------------------------------------------------------------------- */
+
+const W = 480, H = 270;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+/* ==================== WEJŚCIE ==================== */
+const klaw = {};
+const KLAWISZE = ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'];
+addEventListener('keydown', e => {
+  if (KLAWISZE.includes(e.key)) { e.preventDefault(); if(!klaw[e.key]) klaw[e.key+'_nowy']=true; klaw[e.key]=true; }
+  odblokujDzwiek();
+  if (e.key === 'ArrowUp') pelnyEkranPrzyWyborze();
+  // DEBUG: P – następny etap, O – poprzedni (do podglądania, jak co wygląda)
+  if (e.key === 'p' || e.key === 'P') debugEtap(1);
+  if (e.key === 'o' || e.key === 'O') debugEtap(-1);
+});
+addEventListener('keyup', e => { if (KLAWISZE.includes(e.key)) { e.preventDefault(); klaw[e.key]=false; } });
+addEventListener('blur', () => KLAWISZE.forEach(k => klaw[k]=false));
+function nowy(k){ if(klaw[k+'_nowy']){ klaw[k+'_nowy']=false; return true; } return false; }
+function czyscNowe(){ KLAWISZE.forEach(k => klaw[k+'_nowy']=false); }
+
+if ('ontouchstart' in window) {
+  document.body.classList.add('dotyk');
+  document.querySelectorAll('#dotyk button').forEach(b => {
+    const k = b.dataset.k;
+    const on = e => { e.preventDefault(); if(!klaw[k]) klaw[k+'_nowy']=true; klaw[k]=true; odblokujDzwiek();
+                      if(k === 'ArrowUp') pelnyEkranPrzyWyborze(); };
+    const off = e => { e.preventDefault(); klaw[k]=false; };
+    b.addEventListener('touchstart', on, {passive:false}); b.addEventListener('touchend', off);
+    b.addEventListener('touchcancel', off); b.addEventListener('mousedown', on);
+    b.addEventListener('mouseup', off); b.addEventListener('mouseleave', off);
+  });
+}
+function klikniecieWPlansze(e){
+  odblokujDzwiek(); cv.focus();
+  if (G.ekran === 'intro'){          // dotknięcie ekranu tytułowego zaczyna grę
+    pelnyEkranPrzyWyborze();
+    klaw['ArrowUp_nowy'] = true;
+    return;
+  }
+  if (G.ekran==='karta' || G.ekran==='koniec') klaw['ArrowUp_nowy'] = true;
+}
+
+/* Telefon: pełny ekran + blokada w poziomie. Da się wywołać tylko z gestu
+   użytkownika, więc siedzi na dotknięciu ekranu proszącego o obrót. */
+/* Wywoływane wprost z obsługi klawisza/dotknięcia – przeglądarka pozwala
+   wejść w pełny ekran tylko w trakcie gestu użytkownika, więc nie da się
+   tego zrobić z pętli gry. */
+function pelnyEkranPrzyWyborze(){
+  if(typeof G === 'undefined' || G.ekran !== 'intro') return;
+  if(document.fullscreenElement || document.webkitFullscreenElement) return;
+  naPelnyEkran();
+}
+function naPelnyEkran(){
+  const el = document.documentElement;
+  const zadaj = el.requestFullscreen || el.webkitRequestFullscreen;
+  if(zadaj){
+    const p = zadaj.call(el);
+    if(p && p.then) p.then(zablokujPoziomo).catch(()=>{});
+    else zablokujPoziomo();
+  }
+}
+function zablokujPoziomo(){
+  try{
+    if(screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(()=>{});
+  }catch(e){}
+}
+document.getElementById('obroc').addEventListener('click', () => { odblokujDzwiek(); naPelnyEkran(); });
+['pointerdown','mousedown','touchstart'].forEach(z =>
+  cv.addEventListener(z, klikniecieWPlansze, {passive:true}));
+
+/* ==================== DŹWIĘK ==================== */
+/* Pliki z ElevenLabs (audio/*.mp3). Gdy ich nie ma – awaryjne piszczenie
+   z WebAudio, żeby gra nigdy nie była niema. */
+let dzwiekWlaczony = true, dzwiekOdblokowany = false;
+const KAT_AUDIO = 'audio/';
+const PLIKI = (typeof AUDIO_WBUDOWANE !== 'undefined') ? AUDIO_WBUDOWANE : null;
+const bufory = {};          // klucz -> HTMLAudioElement (wzorzec)
+const gotowe = {};          // klucz -> czy da się odtworzyć
+
+function zrodlo(klucz){ return PLIKI ? (PLIKI[klucz] || null) : (KAT_AUDIO + klucz + '.mp3'); }
+function wczytajAudio(klucz, glosnosc, petla){
+  const src = zrodlo(klucz);
+  if(!src) return null;
+  const a = new Audio();
+  a.preload = 'auto';
+  a.loop = !!petla;
+  a.volume = glosnosc;
+  a.addEventListener('canplaythrough', () => { gotowe[klucz] = true; });
+  a.addEventListener('error', () => { gotowe[klucz] = false; });
+  a.src = src;
+  bufory[klucz] = a;
+  return a;
+}
+
+let AC = null;
+function odblokujDzwiek(){
+  if(!AC){ try{ AC = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+  if(AC && AC.state === 'suspended') AC.resume();
+  dzwiekOdblokowany = true;
+}
+function ton(f, dl, typ='square', gl=0.06, op=0){
+  if(!AC || !dzwiekWlaczony) return;
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = typ; o.frequency.value = f;
+  g.gain.setValueAtTime(0, AC.currentTime+op);
+  g.gain.linearRampToValueAtTime(gl, AC.currentTime+op+0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, AC.currentTime+op+dl);
+  o.connect(g); g.connect(AC.destination);
+  o.start(AC.currentTime+op); o.stop(AC.currentTime+op+dl+0.02);
+}
+const ZAPAS = {                       // awaryjne chiptune'y
+  sfx_skok(){ ton(420,0.10,'square',0.05); ton(660,0.09,'square',0.04,0.05); },
+  sfx_zbierz(){ ton(880,0.07,'square',0.05); ton(1180,0.12,'square',0.05,0.07); },
+  sfx_sukces(){ [523,659,784,1047].forEach((f,i)=>ton(f,0.2,'square',0.06,i*0.1)); },
+  sfx_zle(){ ton(200,0.12,'sawtooth',0.05); ton(150,0.16,'sawtooth',0.05,0.1); },
+  sfx_bum(){ ton(90,0.2,'sawtooth',0.07); },
+  sfx_drzwi(){ [660,880,1047].forEach((f,i)=>ton(f,0.14,'square',0.05,i*0.08)); },
+  sfx_hau(){ ton(300,0.09,'square',0.06); ton(220,0.14,'square',0.06,0.09); }
+};
+const KLUCZE_SFX = ['sfx_skok','sfx_zbierz','sfx_sukces','sfx_zle','sfx_bum','sfx_drzwi','sfx_hau'];
+function sfx(klucz){
+  if(!dzwiekWlaczony) return;
+  const wzor = bufory[klucz];
+  const zapas = () => { if(ZAPAS[klucz]) ZAPAS[klucz](); };
+  if(!wzor || gotowe[klucz] === false){ zapas(); return; }
+  const k = wzor.cloneNode();
+  k.volume = GLOSNOSC_EFEKTOW;
+  const p = k.play();
+  if(p && p.catch) p.catch(zapas);       // plik jeszcze się ładuje -> piszczyk z WebAudio
+}
+
+/* --- narrator (mali gracze jeszcze nie czytają, więc wszystko jest mówione) --- */
+let mowaTeraz = null, kolejkaMowy = [];
+function mow(...klucze){
+  if(!dzwiekWlaczony) return;
+  kolejkaMowy = klucze.filter(Boolean);
+  nastepnaMowa(true);
+}
+function dopowiedz(klucz){
+  if(!dzwiekWlaczony || !klucz) return;
+  kolejkaMowy.push(klucz);
+  if(!mowaTeraz) nastepnaMowa(false);
+}
+function nastepnaMowa(przerwij){
+  if(przerwij && mowaTeraz){ try{ mowaTeraz.pause(); mowaTeraz.currentTime = 0; }catch(e){} mowaTeraz = null; }
+  if(mowaTeraz) return;
+  const k = kolejkaMowy.shift();
+  if(!k) return;
+  const wzor = bufory[k];
+  if(!wzor || gotowe[k] === false){ nastepnaMowa(false); return; }
+  const a = wzor.cloneNode();
+  a.volume = GLOSNOSC_NARRATORA;
+  a.addEventListener('ended', () => { mowaTeraz = null; nastepnaMowa(false); });
+  a.addEventListener('error', () => { mowaTeraz = null; nastepnaMowa(false); });
+  mowaTeraz = a;
+  a.play().catch(() => { mowaTeraz = null; nastepnaMowa(false); });
+}
+function cisza(){
+  kolejkaMowy = [];
+  if(mowaTeraz){ try{ mowaTeraz.pause(); }catch(e){} mowaTeraz = null; }
+}
+
+/* --- muzyka --- */
+let muzykaTeraz = null, muzykaKlucz = null;
+function graj(klucz){
+  if(muzykaKlucz === klucz){
+    if(muzykaTeraz && muzykaTeraz.paused && dzwiekWlaczony) muzykaTeraz.play().catch(()=>{});
+    return;
+  }
+  if(muzykaTeraz){ try{ muzykaTeraz.pause(); }catch(e){} }
+  muzykaKlucz = klucz;
+  const a = bufory[klucz];
+  muzykaTeraz = a || null;
+  if(a && dzwiekWlaczony){
+    a.volume = GLOSNOSC_MUZYKI;
+    try{ a.currentTime = 0; }catch(e){}
+    const p = a.play();
+    // gdy plik nie zdążył się wczytać, spróbuj ponownie, kiedy będzie gotowy
+    if(p && p.catch) p.catch(() => {
+      a.addEventListener('canplay', () => {
+        if(dzwiekWlaczony && muzykaKlucz === klucz) a.play().catch(()=>{});
+      }, {once:true});
+    });
+  }
+}
+const KLUCZE_MUZ = ['muz_menu','muz_gra','muz_koniec'];
+const KLUCZE_MOWA = [
+  // zapowiedzi poranka Zuzi
+  'z_start','z_koniec','z_poziom1','z_poziom2','z_poziom3','z_poziom4',
+  'z_poziom5','z_poziom6','z_poziom7','z_poziom8',
+  // wstawanie
+  'z_wstawanie_jak','z_wstawanie_ok','wstawanie_jak','wstawanie_spij',
+  // Jogi, kredki, podłoga, śmieci, kwiatki, skradanie, szkoła
+  'zad_miska','zad_karma_pies','zad_jogi','jogi_je',
+  'kredki_jak','kredka_gotowa','kredki_ok',
+  'podloga_jak','podloga_ok',
+  'zad_worek','zad_smieci','zad_kosz',
+  'zad_konewka','zad_kwiatek','kwiatki_ok',
+  'cicho_jak','cicho_stop','cicho_ups','cicho_ok',
+  'zad_bluza','zad_spodnie','zad_buty','zad_plecak','zad_szkola',
+  // pochwały i podpowiedzi
+  'brawo1','brawo2','brawo3','brawo4','zle'];
+
+KLUCZE_MUZ.forEach(k => wczytajAudio(k, GLOSNOSC_MUZYKI, true));
+KLUCZE_SFX.forEach(k => wczytajAudio(k, GLOSNOSC_EFEKTOW, false));
+KLUCZE_MOWA.forEach(k => wczytajAudio(k, GLOSNOSC_NARRATORA, false));
+
+document.getElementById('glosnik').addEventListener('click', e => {
+  e.stopPropagation();
+  dzwiekWlaczony = !dzwiekWlaczony;
+  e.currentTarget.textContent = dzwiekWlaczony ? '🔊' : '🔇';
+  if(!dzwiekWlaczony){ cisza(); if(muzykaTeraz) try{ muzykaTeraz.pause(); }catch(err){} }
+  else if(muzykaTeraz) muzykaTeraz.play().catch(()=>{});
+});
+
+/* ==================== ZDJĘCIA-GŁOWY ====================
+   Głowy i portrety to prawdziwe zdjęcia przerobione na piksele. */
+const OBRAZY = {}, obrazkiOK = {};
+const NAZWY_OBRAZOW = ['glowa_zuzia','portret_zuzia','glowa_tata','portret_tata'];
+NAZWY_OBRAZOW.forEach(n => {
+  const img = new Image();
+  img.onload  = () => obrazkiOK[n] = true;
+  img.onerror = () => obrazkiOK[n] = false;
+  const wbudowane = (typeof OBRAZY_WBUDOWANE !== 'undefined') ? OBRAZY_WBUDOWANE[n] : null;
+  img.src = wbudowane || (n + '.png');
+  OBRAZY[n] = img;
+});
+function obraz(n){ return obrazkiOK[n] ? OBRAZY[n] : null; }
+
+/* ==================== PALETA I SILNIK SPRITE'ÓW ==================== */
+const PAL = {
+  '.': null,
+  k:'#000000', w:'#fffeff', s:'#bcbcbc', d:'#4f4f4f', a:'#adadad',
+  r:'#d82800', R:'#a80020', p:'#fe8170', o:'#fc9838', j:'#ea9e22',
+  y:'#f8d878', Y:'#bcbe00', e:'#e4e594',
+  b:'#0058f8', B:'#0000bc', c:'#3cbcfc', z:'#64b0ff',
+  g:'#00a800', G:'#007800', l:'#b8f818',
+  n:'#503000', N:'#ac7c00', m:'#f7d8a5', t:'#fecCc5',
+  v:'#7527fe', q:'#fe6ecc'
+};
+const pamiecSpr = new Map();
+function spr(nazwa, wiersze){
+  if(pamiecSpr.has(nazwa)) return pamiecSpr.get(nazwa);
+  const r = wiersze;
+  const sw = r[0].length, sh = r.length;
+  const c = document.createElement('canvas');
+  c.width = sw; c.height = sh;
+  const x = c.getContext('2d');
+  for(let j=0;j<sh;j++) for(let i=0;i<sw;i++){
+    const kol = PAL[r[j][i]];
+    if(kol){ x.fillStyle = kol; x.fillRect(i,j,1,1); }
+  }
+  pamiecSpr.set(nazwa, c);
+  return c;
+}
+function rysujSpr(nazwa, wiersze, x, y, odbij){
+  const c = spr(nazwa, wiersze);
+  x = Math.round(x); y = Math.round(y);
+  if(odbij){
+    ctx.save(); ctx.translate(x + c.width, y); ctx.scale(-1,1);
+    ctx.drawImage(c, 0, 0); ctx.restore();
+  } else ctx.drawImage(c, x, y);
+}
+function pr(x,y,w,h,kol){ ctx.fillStyle = kol; ctx.fillRect(Math.round(x),Math.round(y),Math.round(w),Math.round(h)); }
+function slonce(x,y,r){                 // pikselowe koło – liczone wiersz po wierszu
+  const pr2 = r/2, cx = x + pr2;
+  for(let j=0;j<r;j++){
+    const dy = j + 0.5 - pr2;
+    const pol = Math.sqrt(Math.max(0, pr2*pr2 - dy*dy));
+    if(pol < 0.5) continue;
+    pr(cx-pol, y+j, pol*2, 1, '#f8d878');
+  }
+  const wr = pr2*0.55;
+  for(let j=0;j<r;j++){
+    const dy = j + 0.5 - pr2;
+    const pol = Math.sqrt(Math.max(0, wr*wr - dy*dy));
+    if(pol < 0.5) continue;
+    pr(cx-pol, y+j, pol*2, 1, '#fffeff');
+  }
+}
+
+function kolo(cx, cy, r, kol){            // pikselowe koło (środek, promień)
+  for(let j=-r;j<=r;j++){
+    const pol = Math.sqrt(Math.max(0, r*r - j*j));
+    if(pol < 0.5) continue;
+    pr(cx-pol, cy+j, pol*2, 1, kol);
+  }
+}
+
+/* ==================== SPRITE'Y PRZEDMIOTÓW (16x16) ==================== */
+const IKONY = {
+miska:[
+"................","................","................","................",
+"................",".kkkkkkkkkkkkkk.",".kaaaaaaaaaaaak.",".kwwwwwwwwwwwwk.",
+"..kwwwwwwwwwwk..","..kwwwwwwwwwwk..","...kwwwwwwwwk...","....kwwwwwwk....",
+".....kkkkkk.....","................","................","................"],
+zarcie:[
+"................","................","................","................",
+".kkkkkkkkkkkkkk.",".knmnjnmjnmnjnk.",".knnnnnnnnnnnnk.",".kwwwwwwwwwwwwk.",
+"..kwwwwwwwwwwk..","..kwwwwwwwwwwk..","...kwwwwwwwwk...","....kwwwwwwk....",
+".....kkkkkk.....","................","................","................"],
+karma:[
+"................","................","....kkkkkkk.....","...kyyyyyyyk....",
+"...kykkkkkyk....","...kyknnnkyk....","...kyknnnkyk....","...kykkkkkyk....",
+"...kyyyyyyyk....","...kynnnnnyk....","...kyyyyyyyk....","....kkkkkkk.....",
+"................","................","................","................"],
+jogi:[
+"................","..kk........kk..",".knnk......knnk.",".knnnkkkkkknnnk.",
+".knnnnjjjjnnnnk.",".knnjjjjjjjjnnk.",".knjjwjjjjwjjnk.","..kjjjjjjjjjjk..",
+"..kjjjjkkjjjjk..","...kjjjkkjjjk...","....kkjjjjkk....","...kjjjjjjjjk...",
+"..kjjjjjjjjjjk..","..kjjkkjjkkjjk..","..kkk.kkk.kkk...","................"],
+worek:[
+"................","......kkk.......",".....kdkdk......","....kddddddk....",
+"...kdddddddddk..","..kddddddddddk..",".kdddddddddddk..",".kdadddddddddk..",
+".kdadddddddddk..",".kddddddddddddk.",".kddddddddddddk.","..kddddddddddak.",
+"..kkkkkkkkkkkk..","................","................","................"],
+banan:[
+"................","................","...........kk...","..........kyyk..",
+".........kyyk...","...kk...kyyk....","..kyyk.kyyk.....","..kyykkyyk......",
+"...kyyyyyk......","....kyyyk.......","...kkyykkk......","..kyyyyyyyk.....",
+"..kkkkkkkkk.....","................","................","................"],
+papier:[
+"................","................","....kkkkkk......","...kwwwwwwk.....",
+"..kwwswwswwk....","..kwswwwwswk....",".kwwwswwwwwwk...",".kwswwwswwwwk...",
+".kwwwwwwswwwk...","..kwswwwwwwk....","..kwwwwswwk.....","...kwwwwwk......",
+"....kkkkk.......","................","................","................"],
+butelka:[
+"................",".....kkk........",".....kck........",".....kck........",
+"....kccck.......","...kccccck......","...kczzzck......","...kczzzck......",
+"...kcrrrck......","...kczzzck......","...kczzzck......","...kczzzck......",
+"...kcccccck.....","....kkkkkk......","................","................"],
+konewka:[
+"................","................","........kkkkk...",".......kzzzzzk..",
+"..kk..kzzzzzzzk.",".kwwkkzzzzzzzzk.","..kwwkzzzzzzzzk.","...kwkzzzzzzzzk.",
+"...kkzzzzzzzzzk.","....kzzzzzzzkk..","....kzzzzzzzk...","....kzzzzzzzk...",
+".....kkkkkkk....","................","................","................"],
+plecak:[
+"................","................","....kkkkkkk.....","...kvvvvvvvk....",
+"..kvvvvvvvvvk...","..kvvvvvvvvvk...","..kvkkkkkkkvk...","..kvkqqqqqkvk...",
+"..kvkkkkkkkvk...","..kvvvvvvvvvk...","..kvvvyyyvvvk...","..kvvvvvvvvvk...",
+"...kkkkkkkkk....","................","................","................"],
+spodnie:[
+"................","..kkkkkkkkkkkk..","..kcccccccccck..","..kbbbbbbbbbbk..",
+"..kbbbbbbbbbbk..","..kbbbbbbbbbbk..","..kbbbbkkbbbbk..","..kbbbbkkbbbbk..",
+"..kbbbbkkbbbbk..","..kbcbbkkbbcbk..","..kbbbbkkbbbbk..","..kbbbbkkbbbbk..",
+"..kkkkkkkkkkkk..","................","................","................"],
+bluza:[
+"................","................","...kk....kk.....","..kqqkkkkqqk....",
+".kqqqqqqqqqqqk..",".kqqqqqqqqqqqk..",".kkkqqqqqqqkkk..","...kqqqqqqqk....",
+"...kqqwqqwqqk...","...kqqqqqqqk....","...kqqwqqwqqk...","...kqqqqqqqk....",
+"...kkkkkkkkk....","................","................","................"],
+buty:[
+"................","................","................","..kkk.....kkk...",
+"..kvvk....kvvk..","..kvvvk...kvvvk.","..kvvvvk..kvvvvk",".kwwwwwk.kwwwwwk",
+".kkkkkkk.kkkkkkk","................","................","................",
+"................","................","................","................"]
+};
+/* kwiatki różnią się tylko kolorem płatków – Q podmieniamy na kolor z palety */
+const KWIATEK = [
+"................","......kk........",".....kQQk.......","....kQQQQk......",
+"...kQQyyQQk.....","...kQQyyQQk.....","....kQQQQk......",".....kggk.......",
+"....kggggk......","...kggkggk......",".....kgk........","..kkkkkkkkkk....",
+"..kNNNNNNNNk....","...kNNNNNNk.....","....kkkkkk......","................"];
+['q','r','c'].forEach((kol, i) => { IKONY['kwiatek'+(i+1)] = KWIATEK.map(w => w.split('Q').join(kol)); });
+
+const NAZWY = {
+  miska:'miskę Jogiego', karma:'karmę dla Jogiego', jogi:'Jogiego',
+  worek:'worek na śmieci', banan:'skórkę od banana', papier:'zgnieciony papier',
+  butelka:'butelkę', konewka:'konewkę',
+  kwiatek1:'pierwszego kwiatka', kwiatek2:'drugiego kwiatka', kwiatek3:'ostatniego kwiatka',
+  bluza:'bluzę', spodnie:'spodnie', buty:'buty', plecak:'plecak'
+};
+function rysujIkone(typ, x, y, odbij){
+  const w = IKONY[typ] || IKONY.miska;
+  rysujSpr('ik_'+typ, w, x-8, y-8, odbij);
+}
+
+/* ==================== POSTACIE ====================
+   Głowa to przerobione na piksele zdjęcie, reszta rysowana pikselami.
+   Ubranie dochodzi w miarę zbierania rzeczy – widać, że Zuzia się ubiera. */
+
+const CHOD = [                     // 4-klatkowy cykl chodu
+  {a:  4, b: -4, bob:0, dl:10},
+  {a:  1, b: -1, bob:1, dl:9},
+  {a: -4, b:  4, bob:0, dl:10},
+  {a: -1, b:  1, bob:1, dl:9}
+];
+const SKORA = '#fecCc5', SKORA_C = '#e09a8a';
+
+function rysujPostac(px, py, kier, faza, wPowietrzu, opada){
+  const x = Math.round(px), y = Math.round(py);
+  const b = bohater(), u = b.ubior, st = G.stroj;
+  ctx.save();
+  if(kier < 0){ ctx.translate(2*x + 22, 0); ctx.scale(-1, 1); }
+  const kl = ((Math.floor(faza) % 4) + 4) % 4;
+  const k = CHOD[kl];
+  const bob = wPowietrzu ? 0 : k.bob;
+  const gy = y + bob;                       // głowa 24x22
+  const ty = gy + 21;                       // tułów 14, nogi 10, but 4  => razem 50
+
+  ctx.globalAlpha = 0.25; pr(x+3, y+49, 16, 2, '#000000'); ctx.globalAlpha = 1;
+
+  const barwaNogi  = st.spodnie ? u.spodnie  : u.pizama;
+  const barwaNogiC = st.spodnie ? u.spodnieC : u.pizamaPas;
+  const barwaStopy  = st.buty ? '#2b2b33' : (st.skarpetki ? '#fffeff' : SKORA);
+  const barwaStopyC = st.buty ? '#000000' : (st.skarpetki ? '#bcbcbc' : SKORA_C);
+  function noga(dx, dl, tyl){
+    const kol = tyl ? barwaNogiC : barwaNogi;
+    if(st.spodnie){
+      pr(x+7+dx, ty+14, 5, 4, kol);
+      pr(x+8+dx, ty+18, 3, dl-4, tyl ? SKORA_C : SKORA);
+    } else {
+      pr(x+7+dx, ty+14, 5, dl, kol);
+    }
+    pr(x+6+dx, ty+14+dl, 7, 4, tyl ? barwaStopyC : barwaStopy);
+  }
+  if(wPowietrzu){ noga(-5, 6, true); noga(4, 6, false); }
+  else { noga(k.b, k.dl, true); noga(k.a, k.dl, false); }
+
+  if(st.plecak){                       // plecak wystaje zza pleców
+    pr(x-4, ty, 9, 15, '#7527fe'); pr(x-4, ty, 9, 1, '#c676ff');
+    pr(x-4, ty+5, 9, 2, '#fe6ecc'); pr(x+3, ty+2, 2, 11, '#4a19a0');
+    obrys(x-4, ty, 9, 15);
+  }
+
+  const rekaw = st.kurtka ? u.kurtkaJasna : (st.koszulka ? u.rekawGora : u.pizama);
+  const hus = wPowietrzu ? 0 : -k.a;
+  const dy = wPowietrzu ? -7 : Math.round(hus/2);
+  pr(x+1,  ty+2+dy, 3, 8, rekaw);   pr(x+1,  ty+10+dy, 3, 3, SKORA);
+  pr(x+18, ty+2-dy, 3, 8, rekaw);   pr(x+18, ty+10-dy, 3, 3, SKORA);
+
+  if(st.kurtka){
+    pr(x+4, ty, 14, 14, u.kurtka);
+    pr(x+4, ty, 14, 1, u.kurtkaJasna);
+    pr(x+10, ty, 2, 14, u.kurtkaZamek);
+  } else if(st.koszulka){
+    pr(x+4, ty, 14, 14, u.gora);
+    pr(x+4, ty, 14, 1, u.goraJasna);
+    for(const [ox,oy] of [[2,3],[8,2],[5,8],[10,9]]) pr(x+4+ox, ty+oy, 3, 3, u.wzor);
+  } else {
+    pr(x+4, ty, 14, 14, u.pizama);
+    for(let j=1;j<14;j+=3) pr(x+4, ty+j, 14, 1, u.pizamaPas);
+  }
+
+  const gl = obraz(b.glowa);
+  const gw = b.glowaW, gh = b.glowaH, gdy = b.glowaDy;
+  if(gl) ctx.drawImage(gl, x + 11 - Math.round(gw/2), gy + gdy, gw, gh);
+  else { pr(x, gy, 22, 22, SKORA); pr(x, gy, 22, 6, '#e4e594'); }
+  if(st.czapka){
+    const cy = gy + gdy;
+    pr(x, cy-2, 22, 6, u.czapka);
+    pr(x+14, cy-2, 8, 6, u.czapkaDodatek);
+    pr(x-2, cy+3, 20, 3, u.czapka);
+    pr(x+4, cy+1, 4, 3, '#fffeff');
+  }
+  ctx.restore();
+}
+
+function rysujTate(px, py, kier, faza){
+  const x = Math.round(px), y = Math.round(py);
+  const b = bohater(), u = b.opiekunUbior;
+  ctx.save();
+  if(kier < 0){ ctx.translate(2*x + 24, 0); ctx.scale(-1, 1); }
+  const kl = ((Math.floor(faza) % 4) + 4) % 4;
+  const k = CHOD[kl];
+  const gy = y + k.bob, ty = gy + 23;      // głowa 24, tułów 18, nogi 13, but 4 => 58
+
+  ctx.globalAlpha = 0.25; pr(x+4, y+57, 18, 2, '#000000'); ctx.globalAlpha = 1;
+
+  pr(x+9+k.b, ty+18, 6, 13, u.nogiC); pr(x+8+k.b, ty+31, 8, 4, u.butC);
+  pr(x+9+k.a, ty+18, 6, 13, u.nogi);  pr(x+8+k.a, ty+31, 8, 4, u.but);
+
+  const hus = -k.a;
+  pr(x+1,  ty+4+Math.round(hus/2), 3, 12, u.gora); pr(x+1,  ty+16+Math.round(hus/2), 3, 3, SKORA);
+  pr(x+20, ty+4-Math.round(hus/2), 3, 12, u.gora); pr(x+20, ty+16-Math.round(hus/2), 3, 3, SKORA);
+
+  pr(x+4, ty, 16, 18, u.gora);
+  pr(x+4, ty, 16, 1, u.goraJasna);
+  pr(x+4, ty+16, 16, 2, u.goraCien);
+
+  const gl = obraz(b.glowaOp);
+  if(gl) ctx.drawImage(gl, x+2, gy, 20, 24);
+  else { pr(x+2, gy, 20, 24, SKORA); pr(x+2, gy+14, 20, 10, '#4f4f4f'); }
+  ctx.restore();
+}
+
+/* ==================== MEBLE / PLATFORMY ==================== */
+function blok(x,y,w,h,gora,srodek,dol){
+  pr(x,y,w,h,srodek);
+  pr(x,y,w,1,gora);
+  pr(x,y+h-1,w,1,dol);
+  pr(x,y,1,h,gora); pr(x+w-1,y,1,h,dol);
+}
+function obrys(x,y,w,h){ ctx.strokeStyle='#000000'; ctx.lineWidth=1;
+  ctx.strokeRect(Math.round(x)+0.5, Math.round(y)+0.5, Math.round(w)-1, Math.round(h)-1); }
+
+function rysujPlatforme(p){
+  const x = Math.round(p.x), y = Math.round(p.y), w = Math.round(p.w), h = Math.round(p.h);
+  switch(p.styl){
+    case 'podloga':
+      pr(x,y,w,h,'#ac7c00'); pr(x,y,w,2,'#e45c10');
+      for(let i=0;i<w;i+=16){ pr(x+i,y,1,h,'#503000'); pr(x+i+8,y+3,1,h-3,'#8a5a20'); }
+      for(let j=y+8;j<y+h;j+=8) pr(x,j,w,1,'#8a5a20');
+      break;
+    case 'kafle':
+      pr(x,y,w,h,'#c0dfff'); pr(x,y,w,2,'#fffeff');
+      for(let i=0;i<w;i+=12) pr(x+i,y+2,1,h-2,'#9290ff');
+      for(let j=y+12;j<y+h;j+=12) pr(x,j,w,1,'#9290ff');
+      break;
+    case 'ziemia':
+      pr(x,y,w,h,'#883800'); pr(x,y,w,4,'#00a800'); pr(x,y+4,w,1,'#007800');
+      for(let i=0;i<w;i+=8) pr(x+i+3,y+7,2,2,'#503000');
+      for(let i=0;i<w;i+=6) pr(x+i,y-2,2,2,'#58d854');
+      break;
+    case 'lozko':
+      blok(x,y,w,h,'#fe6ecc','#b71e7b','#6e0040'); obrys(x,y,w,h);
+      pr(x+2,y+2,w-4,5,'#fec4ea');                    // kołdra
+      pr(x+3,y-6,14,8,'#fffeff'); obrys(x+3,y-6,14,8); // poduszka
+      pr(x-3,y-14,4,h+14,'#ac7c00'); obrys(x-3,y-14,4,h+14);
+      pr(x+w-1,y-8,4,h+8,'#ac7c00'); obrys(x+w-1,y-8,4,h+8);
+      break;
+    case 'pufa':
+      blok(x,y,w,h,'#45e082','#00a800','#007800'); obrys(x,y,w,h);
+      pr(x+2,y+2,w-4,2,'#b8f818');
+      break;
+    case 'szafka': case 'komoda': case 'szafkaN': case 'stopien': case 'podest':
+      blok(x,y,w,h,'#e45c10','#ac7c00','#503000'); obrys(x,y,w,h);
+      if(p.styl==='stopien' || p.styl==='podest'){
+        pr(x+1,y+1,w-2,1,'#f7d8a5');
+        pr(x, y+h, w, 30, '#883800');            // podstopnica pod schodkiem
+        pr(x, y+h, 1, 30, '#503000'); pr(x+w-1, y+h, 1, 30, '#503000');
+      }
+      else {
+        for(let j=1;j<3;j++) pr(x+2, y+Math.round(h*j/3), w-4, 1, '#503000');
+        for(let j=0;j<3;j++) pr(x+Math.round(w/2)-1, y+Math.round(h*(j+0.5)/3), 2, 2, '#000000');
+      }
+      break;
+    case 'polka':
+      pr(x,y,w,h,'#ac7c00'); pr(x,y,w,1,'#e45c10'); obrys(x,y,w,h);
+      pr(x+3,y+h,2,5,'#503000'); pr(x+w-5,y+h,2,5,'#503000');
+      break;
+    case 'szafa':
+      blok(x,y,w,h,'#e45c10','#ac7c00','#503000'); obrys(x,y,w,h);
+      pr(x+Math.round(w/2)-1,y+2,2,h-4,'#503000');
+      obrys(x+3,y+3,Math.round(w/2)-5,h-6); obrys(x+Math.round(w/2)+2,y+3,Math.round(w/2)-5,h-6);
+      pr(x+Math.round(w/2)-4,y+Math.round(h/2),2,2,'#000000');
+      pr(x+Math.round(w/2)+3,y+Math.round(h/2),2,2,'#000000');
+      break;
+    case 'krzeslo':
+      pr(x+2,y+6,3,h-6,'#ac7c00'); pr(x+w-5,y+6,3,h-6,'#ac7c00');
+      blok(x,y,w,6,'#e45c10','#ac7c00','#503000'); obrys(x,y,w,6);
+      pr(x,y-22,4,24,'#ac7c00'); obrys(x,y-22,4,24);
+      pr(x,y-22,w-4,4,'#e45c10'); obrys(x,y-22,w-4,4);
+      break;
+    case 'stol':
+      pr(x,y,w,h,'#e45c10'); pr(x,y,w,1,'#f7d8a5'); obrys(x,y,w,h);
+      pr(x+6,y+h,4,235-y-h,'#ac7c00'); pr(x+w-10,y+h,4,235-y-h,'#ac7c00');
+      break;
+    case 'blat':
+      pr(x,y,w,h,'#bcbcbc'); pr(x,y,w,1,'#fffeff'); obrys(x,y,w,h);
+      blok(x+2,y+h,w-4,235-y-h,'#e45c10','#ac7c00','#503000');
+      break;
+    case 'lodowka':
+      blok(x,y,w,h,'#fffeff','#e4e594','#bcbcbc');
+      pr(x,y,w,h,'#f2f6fa'); pr(x,y,w,2,'#fffeff'); pr(x,y+h-2,w,2,'#bcbcbc');
+      obrys(x,y,w,h);
+      pr(x,y+Math.round(h*0.34),w,1,'#000000');
+      pr(x+w-5,y+5,2,Math.round(h*0.28),'#4f4f4f');
+      pr(x+w-5,y+Math.round(h*0.4),2,Math.round(h*0.4),'#4f4f4f');
+      pr(x+4,y+5,8,6,'#f8d878'); obrys(x+4,y+5,8,6);
+      break;
+    case 'wanna':
+      pr(x,y,w,h,'#fffeff'); obrys(x,y,w,h);
+      pr(x+3,y+3,w-6,h-8,'#64b0ff');
+      for(let i=0;i<w-10;i+=10) pr(x+6+i,y+5,4,2,'#fffeff');
+      break;
+    case 'umywalka':
+      pr(x,y,w,Math.round(h*0.45),'#fffeff'); obrys(x,y,w,Math.round(h*0.45));
+      pr(x+3,y+3,w-6,Math.round(h*0.45)-6,'#c0dfff');
+      pr(x+Math.round(w/2)-6,y+Math.round(h*0.45),12,Math.round(h*0.55),'#e4e594');
+      obrys(x+Math.round(w/2)-6,y+Math.round(h*0.45),12,Math.round(h*0.55));
+      pr(x+Math.round(w/2)-3,y-8,2,8,'#bcbcbc'); pr(x+Math.round(w/2)-3,y-10,8,2,'#bcbcbc');
+      break;
+    case 'lawka':
+      pr(x,y,w,4,'#ac7c00'); pr(x,y,w,1,'#e45c10'); obrys(x,y,w,4);
+      pr(x,y+7,w,3,'#ac7c00'); obrys(x,y+7,w,3);
+      pr(x+2,y,3,h,'#503000'); pr(x+w-5,y,3,h,'#503000');
+      break;
+    case 'polkaButy':
+      pr(x,y,w,3,'#ac7c00'); obrys(x,y,w,3);
+      pr(x,y+9,w,3,'#ac7c00'); obrys(x,y+9,w,3);
+      pr(x+1,y,3,h,'#503000'); pr(x+w-4,y,3,h,'#503000');
+      break;
+    case 'akwarium':
+      blok(x, y+h-14, w, 14, '#e45c10', '#ac7c00', '#503000'); obrys(x, y+h-14, w, 14);
+      pr(x+4, y-26, w-8, h-12, '#000000');
+      pr(x+6, y-24, w-12, h-16, '#3cbcfc');
+      pr(x+6, y-24, w-12, 3, '#c0dfff');
+      for(let i=0;i<w-16;i+=14) pr(x+10+i, y-6, 4, 6, '#00a800');
+      for(const [dx,dy] of [[18,-18],[46,-12],[70,-20]]) pr(x+dx, y+dy, 3, 3, '#fffeff');
+      break;
+    case 'schodki':
+      blok(x,y,w,h,'#fffeff','#bcbcbc','#4f4f4f'); obrys(x,y,w,h);
+      pr(x+4,y+5,w-8,h-5,'#adadad');
+      break;
+    case 'skrzynka':
+      blok(x,y,w,h,'#e45c10','#ac7c00','#503000'); obrys(x,y,w,h);
+      obrys(x+2,y+2,w-4,h-4);
+      break;
+    default:
+      blok(x,y,w,h,'#e45c10','#ac7c00','#503000'); obrys(x,y,w,h);
+  }
+}
+
+/* ==================== TŁA ==================== */
+const CHMURA = [
+"....kkkk........",
+"..kkwwwwkk......",
+".kwwwwwwwwkk....",
+"kwwwwwwwwwwwk...",
+"kwwwwwwwwwwwk...",
+".kkkkkkkkkkkk..."];
+function drzewo(x, yPnia){
+  pr(x, yPnia, 10, 235-yPnia, '#503000');
+  pr(x, yPnia, 3, 235-yPnia, '#883800');
+  // korona: trzy pasy o różnej szerokości dają „schodkowe” koło
+  pr(x-16, yPnia-40, 42, 10, '#00a800');
+  pr(x-24, yPnia-30, 58, 18, '#00a800');
+  pr(x-16, yPnia-12, 42, 10, '#00a800');
+  pr(x-16, yPnia-40, 42, 3,  '#58d854');
+  pr(x-24, yPnia-30, 12, 4,  '#58d854');
+  pr(x-8,  yPnia-24, 10, 6,  '#007800');
+  pr(x+10, yPnia-20, 12, 5,  '#007800');
+}
+const KRZAK = [
+".....kkkkkk.....",
+"...kkllllllkk...",
+"..kllggllggllk..",
+".kllgggggggggk..",
+"kllgggggggggggk.",
+"kgggggggggggggk.",
+"kgggggggggggggk.",
+"kkkkkkkkkkkkkkk."];
+
+function paski(x0, szer, kol1, kol2, wys){
+  pr(0,0,W,wys,kol1);
+  for(let i = -(x0 % 16); i < W; i += 16) pr(i,0,8,wys,kol2);
+}
+const TLA = {
+  sypialnia(cam,t){
+    paski(cam*0.5, 16, '#f7d8a5', '#e4e594', H);
+    ctx.save(); ctx.translate(-Math.round(cam),0);
+    // okno ze wschodzącym słońcem
+    pr(190,30,120,95,'#000000'); pr(192,32,116,91,'#64b0ff');
+    pr(192,95,116,28,'#58d854');
+    slonce(228,66,44);
+    pr(192,32,116,4,'#fffeff'); pr(248,32,4,91,'#fffeff'); pr(192,76,116,4,'#fffeff');
+    // obrazek na ścianie
+    pr(500,55,60,48,'#000000'); pr(502,57,56,44,'#64b0ff');
+    pr(502,86,56,15,'#00a800'); pr(540,66,10,10,'#f8d878');
+    // plakat z gwiazdą
+    pr(800,60,52,66,'#000000'); pr(802,62,48,62,'#fffeff');
+    rysujSpr('gw',[
+      ".......kk.......","......kyyk......","......kyyk......","kkkkkkyyyykkkkkk",
+      "kyyyyyyyyyyyyyyk",".kyyyyyyyyyyyyk.","..kyyyyyyyyyyk..","...kyyyykyyyk...",
+      "..kyyyk..kyyyk..",".kyyk......kyyk.","kkk..........kkk"], 806, 76, false);
+    ctx.restore();
+  },
+  kuchnia(cam,t){
+    pr(0,0,W,H,'#f7d8a5');
+    ctx.save(); ctx.translate(-Math.round(cam),0);
+    for(let j=0;j<8;j++) for(let i=0;i<80;i++){
+      const x = i*24 + (j%2?12:0), y = 12+j*14;
+      pr(x,y,22,12,'#e4e594'); pr(x,y,22,1,'#fffeff'); pr(x,y+11,22,1,'#ac7c00');
+    }
+    // okno
+    pr(500,30,90,70,'#000000'); pr(502,32,86,66,'#64b0ff');
+    pr(502,78,86,20,'#58d854'); pr(555,48,20,20,'#f8d878');
+    pr(543,32,4,66,'#fffeff'); pr(502,60,86,4,'#fffeff');
+    // szafki wiszące
+    for(let i=0;i<3;i++){ const x=860+i*56;
+      blok(x,50,52,50,'#e45c10','#ac7c00','#503000'); obrys(x,50,52,50);
+      pr(x+24,92,4,2,'#000000'); }
+    // poręcz schodów – rysowana pikselowo, schodkami
+    pr(8,64,120,4,'#e45c10'); pr(8,64,120,1,'#f7d8a5');
+    for(let i=0;i<48;i++){ const px=128+i*5, py=64+i*3;
+      pr(px,py,5,4,'#e45c10'); pr(px,py,5,1,'#f7d8a5'); }
+    ctx.restore();
+  },
+  lazienka(cam,t){
+    pr(0,0,W,H,'#c0dfff');
+    ctx.save(); ctx.translate(-Math.round(cam),0);
+    for(let j=0;j<14;j++) for(let i=0;i<80;i++){
+      const x=i*20, y=j*20;
+      pr(x,y,19,19,'#d3d2ff'); pr(x,y,19,1,'#fffeff'); pr(x,y+18,19,1,'#9290ff');
+    }
+    // lustro
+    pr(485,72,74,74,'#000000'); pr(487,74,70,70,'#c0dfff');
+    pr(490,120,30,20,'#fffeff');
+    // ręcznik
+    pr(228,88,42,58,'#000000'); pr(230,90,38,54,'#fe6ecc');
+    pr(230,96,38,4,'#fec4ea'); pr(230,110,38,4,'#fec4ea');
+    ctx.restore();
+  },
+  przedpokoj(cam,t){
+    pr(0,0,W,H,'#f7d8a5');
+    ctx.save(); ctx.translate(-Math.round(cam),0);
+    for(let i=0;i<80;i+=1) pr(i*12,0,6,165,'#e4e594');
+    pr(0,163,1020,4,'#503000');
+    blok(0,167,1020,68,'#ac7c00','#883800','#503000');
+    for(let i=0;i<80;i++) pr(i*22,167,2,68,'#503000');
+    // wieszak
+    pr(296,124,6,111,'#503000');
+    pr(282,118,34,7,'#ac7c00'); obrys(282,118,34,7);
+    for(const dx of [-12,0,12]){ pr(299+dx,125,3,8,'#503000'); }
+    // lustro
+    pr(700,60,42,80,'#000000'); pr(702,62,38,76,'#c0dfff');
+    ctx.restore();
+  },
+  sypialniaP(cam,t){
+    paski(cam*0.5, 16, '#fec4ea', '#ffe4dc', H);
+    ctx.save(); ctx.translate(-Math.round(cam),0);
+    pr(190,30,120,95,'#000000'); pr(192,32,116,91,'#64b0ff');
+    pr(192,95,116,28,'#58d854'); slonce(228,66,44);
+    pr(192,32,116,4,'#fffeff'); pr(248,32,4,91,'#fffeff'); pr(192,76,116,4,'#fffeff');
+    // obrazek z serduszkiem
+    pr(470,55,58,48,'#000000'); pr(472,57,54,44,'#ffe4dc');
+    rysujSpr('serce',[
+      "..kk...kk..",".kqqk.kqqk.","kqqqqkqqqqk","kqqqqqqqqqk",".kqqqqqqqk.",
+      "..kqqqqqk..","...kqqqk...","....kqk....","............"], 490, 66, false);
+    ctx.restore();
+  },
+  salon(cam,t){
+    pr(0,0,W,H,'#e4e594');
+    ctx.save(); ctx.translate(-Math.round(cam),0);
+    for(let i=0;i<60;i++) pr(i*24,0,12,204,'#f7d8a5');
+    pr(0,202,1020,4,'#503000');
+    blok(0,206,1020,29,'#ac7c00','#883800','#503000');
+    // okno
+    pr(230,40,110,80,'#000000'); pr(232,42,106,76,'#64b0ff');
+    pr(232,96,106,22,'#58d854'); pr(283,42,4,76,'#fffeff'); pr(232,76,106,4,'#fffeff');
+    // roślina w doniczce
+    pr(562,150,8,52,'#503000'); pr(562,150,3,52,'#883800');
+    pr(552,118,28,8,'#00a800'); pr(546,126,40,14,'#00a800'); pr(552,140,28,8,'#00a800');
+    pr(552,118,28,2,'#58d854');
+    blok(550,198,32,22,'#e45c10','#ac7c00','#503000');
+    ctx.restore();
+  },
+  szatnia(cam,t){
+    pr(0,0,W,H,'#c0dfff');
+    ctx.save(); ctx.translate(-Math.round(cam),0);
+    for(let j=0;j<14;j++) for(let i=0;i<60;i++){
+      const x=i*22, y=j*20;
+      pr(x,y,21,19,'#d3d2ff'); pr(x,y,21,1,'#fffeff'); pr(x,y+18,21,1,'#9290ff');
+    }
+    // wieszaki na kurtki
+    pr(120,120,180,5,'#503000');
+    for(let i=0;i<5;i++){ pr(132+i*36,125,4,9,'#503000'); pr(129+i*36,133,10,3,'#503000'); }
+    // znaczki dzieci nad wieszakami
+    for(let i=0;i<5;i++) pr(130+i*36,104,12,12,['#d82800','#f8d878','#58d854','#3cbcfc','#fe6ecc'][i]);
+    ctx.restore();
+  },
+  podworko(cam,t){
+    pr(0,0,W,H,'#5c94fc');
+    slonce(398,18,38);
+    ctx.save(); ctx.translate(-Math.round(cam*0.3),0);
+    for(const [x,y] of [[60,40],[260,24],[450,52],[650,32]]) rysujSpr('ch',CHMURA,x,y,false);
+    ctx.restore();
+    ctx.save(); ctx.translate(-Math.round(cam*0.7),0);
+    for(const x of [100,380,700]) drzewo(x, 150);
+    ctx.restore();
+    ctx.save(); ctx.translate(-Math.round(cam),0);
+    // dom
+    pr(-20,115,170,120,'#f7d8a5'); obrys(-20,115,170,120);
+    ctx.fillStyle='#a80020';
+    ctx.beginPath(); ctx.moveTo(-34,117); ctx.lineTo(65,60); ctx.lineTo(164,117); ctx.closePath(); ctx.fill();
+    pr(45,160,40,75,'#503000'); obrys(45,160,40,75); pr(76,198,3,3,'#f8d878');
+    pr(105,145,30,26,'#64b0ff'); obrys(105,145,30,26);
+    for(const x of [250,560]) rysujSpr('kr',KRZAK,x,222,false);
+    ctx.restore();
+  }
+};
+
+/* ==================== POZIOMY (współrzędne w pikselach 480x270) ==================== */
+const POZIOMY_ZUZIA = [
+  { typ:'wstawanie', nazwa:'Wstawaj, Zuziu!', podtytul:'Wygrzeb się z łóżka', glos:'z_poziom1' },
+
+  { nazwa:'Nakarm Jogiego', podtytul:'Piesek czeka na śniadanie', tlo:'kuchnia', szer:1000,
+    glos:'z_poziom2', start:{x:40,y:40},
+    platformy:[
+      {x:0,y:235,w:1000,h:35,styl:'podloga'},
+      {x:0,y:85,w:140,h:15,styl:'podest'},
+      {x:135,y:120,w:55,h:13,styl:'stopien'},
+      {x:190,y:150,w:55,h:13,styl:'stopien'},
+      {x:245,y:180,w:55,h:13,styl:'stopien'},
+      {x:300,y:210,w:55,h:13,styl:'stopien'},
+      {x:430,y:195,w:90,h:40,styl:'szafka'},
+      {x:560,y:170,w:90,h:9,styl:'polka',przenikalna:true},
+      {x:700,y:150,w:70,h:85,styl:'lodowka'}
+    ],
+    zadania:[
+      {typ:'miska',x:475,y:182},
+      {typ:'karma',x:605,y:158, glos:'zad_karma_pies'},
+      {typ:'jogi',x:850,y:226, zadanie:'Nakarm Jogiego!', glos:'zad_jogi'}
+    ],
+    drzwi:{x:930,y:165,w:50,h:70,tekst:'Do pokoju!', zadanie:'Idź do pokoju!'}
+  },
+
+  { typ:'kredki', nazwa:'Kredki do temperowania', podtytul:'Pięć kredek ostrych jak igiełki',
+    glos:'z_poziom3' },
+
+  { typ:'podloga', nazwa:'Umyj podłogę', podtytul:'Mop i wiadro w ruch', glos:'z_poziom4' },
+
+  { nazwa:'Wyrzuć śmieci', podtytul:'Wszystko do worka', tlo:'przedpokoj', szer:950,
+    glos:'z_poziom5', start:{x:30,y:170},
+    platformy:[
+      {x:0,y:235,w:950,h:35,styl:'podloga'},
+      {x:120,y:205,w:105,h:30,styl:'lawka'},
+      {x:390,y:200,w:80,h:35,styl:'szafka'},
+      {x:560,y:170,w:90,h:9,styl:'polka',przenikalna:true},
+      {x:690,y:190,w:85,h:45,styl:'komoda'}
+    ],
+    zadania:[
+      {typ:'worek',x:172,y:190, zadanie:'Weź worek na śmieci!', glos:'zad_worek'},
+      {typ:'banan',x:300,y:222, zadanie:'Podnieś skórkę od banana!', glos:'zad_smieci'},
+      {typ:'papier',x:430,y:182, zadanie:'Podnieś zgnieciony papier!', glos:'zad_smieci'},
+      {typ:'butelka',x:605,y:158, zadanie:'Podnieś butelkę!', glos:'zad_smieci'}
+    ],
+    drzwi:{x:850,y:172,w:62,h:63,tekst:'Do kosza!', kosz:true,
+           zadanie:'Wyrzuć śmieci do kosza!', glos:'zad_kosz'}
+  },
+
+  { nazwa:'Podlej kwiatki', podtytul:'Trzy spragnione kwiatki', tlo:'salon', szer:950,
+    glos:'z_poziom6', start:{x:30,y:170},
+    platformy:[
+      {x:0,y:235,w:950,h:35,styl:'podloga'},
+      {x:110,y:200,w:90,h:35,styl:'szafka'},
+      {x:270,y:170,w:90,h:9,styl:'polka',przenikalna:true},
+      {x:430,y:195,w:80,h:40,styl:'krzeslo'},
+      {x:560,y:150,w:90,h:9,styl:'polka',przenikalna:true},
+      {x:700,y:200,w:90,h:35,styl:'szafka'}
+    ],
+    zadania:[
+      {typ:'konewka',x:155,y:182, zadanie:'Znajdź konewkę!', glos:'zad_konewka'},
+      {typ:'kwiatek1',x:315,y:156, zadanie:'Podlej pierwszego kwiatka!', glos:'zad_kwiatek'},
+      {typ:'kwiatek2',x:605,y:136, zadanie:'Podlej drugiego kwiatka!', glos:'zad_kwiatek'},
+      {typ:'kwiatek3',x:745,y:186, zadanie:'Podlej ostatniego kwiatka!', glos:'zad_kwiatek'}
+    ],
+    drzwi:{x:860,y:165,w:50,h:70,tekst:'Dalej!', zadanie:'Idź do drzwi!'}
+  },
+
+  { typ:'cicho', nazwa:'Nie obudź taty!', podtytul:'Wczoraj był na imprezie w Teatrze Leśnym',
+    glos:'z_poziom7' },
+
+  { nazwa:'Do szkoły!', podtytul:'Ubierz się, plecak i lecimy', tlo:'przedpokoj', szer:950,
+    glos:'z_poziom8', start:{x:30,y:170},
+    platformy:[
+      {x:0,y:235,w:950,h:35,styl:'podloga'},
+      {x:100,y:205,w:105,h:30,styl:'lawka'},
+      {x:280,y:170,w:90,h:9,styl:'polka',przenikalna:true},
+      {x:470,y:210,w:100,h:25,styl:'polkaButy'},
+      {x:640,y:190,w:85,h:45,styl:'komoda'}
+    ],
+    zadania:[
+      {typ:'bluza', stroj:'koszulka', x:150,y:190},
+      {typ:'spodnie',x:325,y:158},
+      {typ:'buty',x:515,y:195},
+      {typ:'plecak',x:682,y:175, zadanie:'Weź plecak!', glos:'zad_plecak'}
+    ],
+    drzwi:{x:840,y:160,w:55,h:75,tekst:'Do szkoły!', zadanie:'Leć do szkoły!', glos:'zad_szkola'}
+  }
+];
+
+/* ---------- kim się gra ---------- */
+const BOHATEROWIE = {
+  zuzia: {
+    imie:'ZUZIA', opiekun:'TATĄ',
+    glowa:'glowa_zuzia', portret:'portret_zuzia', glowaW:24, glowaH:24, glowaDy:-2,
+    glowaOp:'glowa_tata', portretOp:'portret_tata',
+    glosStart:'z_start', glosKoniec:'z_koniec',
+    ubior:{ pizama:'#c676ff', pizamaPas:'#7527fe', spodnie:'#0058f8', spodnieC:'#0000bc',
+            gora:'#fe6ecc', goraJasna:'#fec4ea', wzor:'#fffeff',
+            kurtka:'#00a800', kurtkaJasna:'#58d854', kurtkaZamek:'#b8f818',
+            rekawGora:'#fec4ea', czapka:'#64b0ff', czapkaDodatek:'#c0dfff' },
+    opiekunUbior:{ gora:'#22357a', goraJasna:'#3a4a8b', goraCien:'#0000bc',
+                   nogi:'#2b2b33', nogiC:'#000000', but:'#4f4f4f', butC:'#000000' },
+    poziomy: POZIOMY_ZUZIA
+  }
+};
+function bohater(){ return BOHATEROWIE[G.kto]; }
+function POZ(){ return BOHATEROWIE[G.kto].poziomy; }
+
+/* ==================== STAN GRY ==================== */
+const G = {
+  ekran:'intro', kto:'zuzia', poziom:0, t:0, kartaT:0,
+  gracz:null, kamera:0, zrobione:0, ekwipunek:[],
+  czastki:[], overlay:null, info:null, infoT:0,
+  tata:{x:0,y:0}, ostatnieZadanie:-1,
+  wstawanie:null, kredki:null, podloga:null, cicho:null, debug:0,
+  stroj:{spodnie:false, skarpetki:false, koszulka:false, czapka:false,
+         kurtka:false, buty:false, plecak:false}
+};
+function nowaGra(){
+  for(const c in G.stroj) G.stroj[c] = false;
+  POZ().forEach(p => (p.zadania||[]).forEach(z => z.wziete = false));
+}
+function nowyGracz(x,y){
+  return { x, y, w:22, h:50, vx:0, vy:0, ziemia:false, kier:1, chodT:0, coyote:0, bufor:0, bezpiecz:{x,y} };
+}
+const STARTY_MINIGIER = {
+  wstawanie: () => startWstawania(),
+  kredki:    () => startKredek(),
+  podloga:   () => startPodlogi(),
+  cicho:     () => startCicho()
+};
+function startPoziomu(i){
+  G.poziom = i;
+  const p = POZ()[i];
+  if(p.typ){ STARTY_MINIGIER[p.typ](); return; }
+  G.gracz = nowyGracz(p.start.x, p.start.y);
+  G.kamera = 0; G.zrobione = 0; G.ekwipunek = [];
+  G.czastki = []; G.overlay = null; G.ostatnieZadanie = -1;
+  G.tata = {x:p.start.x-45, y:p.start.y + 50 - 58};
+  p.zadania.forEach(z => z.wziete = false);
+  G.ekran = 'gra';
+  graj('muz_gra');
+  ogloszZadanie(true);
+}
+function dalejPoPoziomie(){
+  if(G.poziom + 1 < POZ().length) kartaPoziomu(G.poziom + 1);
+  else { G.ekran = 'koniec'; graj('muz_koniec'); mow(bohater().glosKoniec); }
+}
+function kartaPoziomu(i){
+  G.poziom = i; G.kartaT = 0; G.ekran = 'karta';
+  graj('muz_menu');
+  const p = POZ()[i];
+  mow(najlepszyGlos(p.glos, p.glosZapas));
+}
+/* Nowe kwestie narratora dochodzą osobnym plikiem. Póki go nie ma, gra sięga
+   po starą kwestię tego poziomu, żeby zawsze coś powiedzieć. */
+function najlepszyGlos(...klucze){
+  const pewny = klucze.find(k => k && gotowe[k] === true);
+  if(pewny) return pewny;
+  return klucze.find(k => k && gotowe[k] !== false) || null;
+}
+
+/* ==================== DEBUG: P / O przeskakuje etapy ==================== */
+function debugEtap(kierunek){
+  if(G.ekran === 'intro'){
+    nowaGra(); G.debug = 150; startPoziomu(0); return;
+  }
+  const ile = POZ().length;
+  let i = G.poziom + kierunek;
+  if(i < 0) i = ile - 1;
+  if(i >= ile) i = 0;
+  cisza();
+  G.wstawanie = null; G.kredki = null; G.podloga = null; G.cicho = null;
+  G.czastki = []; G.overlay = null;
+  G.debug = 150;
+  startPoziomu(i);
+  sfx('sfx_zbierz');
+}
+function rysujDebug(){
+  if(G.debug <= 0) return;
+  G.debug--;
+  const t = 'DEBUG  ETAP ' + (G.poziom+1) + '/' + POZ().length + '  (P / O)';
+  const w = szerTekstu(t, 1) + 8;
+  pr(W-w-2, H-13, w, 11, '#000000');
+  napisL(t, W-w+2, H-8, '#b8f818', null, 1);
+}
+function glosZadania(p, idx){
+  if(idx >= p.zadania.length) return p.drzwi.glos || null;
+  const z = p.zadania[idx];
+  return z.glos || ('zad_' + z.typ);
+}
+function ogloszZadanie(odRazu){
+  const p = POZ()[G.poziom];
+  if(!p || p.typ) return;
+  if(G.zrobione === G.ostatnieZadanie) return;
+  G.ostatnieZadanie = G.zrobione;
+  const k = glosZadania(p, G.zrobione);
+  if(odRazu) dopowiedz(k); else dopowiedz(k);
+}
+
+/* ==================== EFEKTY ==================== */
+function iskry(x,y,kolory,n=14){
+  for(let i=0;i<n;i++){
+    const a = Math.random()*Math.PI*2, v = 0.8+Math.random()*2.2;
+    G.czastki.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v-1,zyc:30+Math.random()*20,
+      kol:kolory[(Math.random()*kolory.length)|0], r:1+Math.random()*2});
+  }
+}
+const SERDUSZKO = [
+".kk.kk.",
+"kqqqqqk",
+"kqqqqqk",
+".kqqqk.",
+"..kqk.."];
+function serduszka(x,y,n=14){                 // serduszka lecą do góry, nie spadają
+  for(let i=0;i<n;i++)
+    G.czastki.push({x:x+(Math.random()-0.5)*34, y:y+(Math.random()-0.5)*20,
+      vx:(Math.random()-0.5)*0.7, vy:-0.5-Math.random()*0.9,
+      zyc:70+Math.random()*45, serce:true, kol:'#fe6ecc', r:2});
+}
+function aktualizujEfekty(){
+  for(let i=G.czastki.length-1;i>=0;i--){
+    const c = G.czastki[i];
+    c.x+=c.vx; c.y+=c.vy; c.zyc--;
+    if(c.serce) c.vy *= 0.985; else c.vy += 0.1;
+    if(c.zyc<=0) G.czastki.splice(i,1);
+  }
+  if(G.infoT>0) G.infoT--;
+}
+function rysujEfekty(){
+  for(const c of G.czastki){
+    if(c.serce) rysujSpr('serduszko', SERDUSZKO, c.x-3, c.y-2, false);
+    else pr(c.x, c.y, Math.max(1,Math.round(c.r)), Math.max(1,Math.round(c.r)), c.kol);
+  }
+}
+function pokazInfo(t){ G.info = t; G.infoT = 110; }
+
+/* ==================== CZCIONKA BITMAPOWA 5x7 ====================
+   Litery zajmują wiersze 1..7 z dziewięciu; wiersz 0 to kreska/kropka
+   nad literą, wiersz 8 to ogonek pod literą (ą, ę). */
+const CZC = {
+ 'A':[".###.","#...#","#...#","#####","#...#","#...#","#...#"],
+ 'B':["####.","#...#","#...#","####.","#...#","#...#","####."],
+ 'C':[".###.","#...#","#....","#....","#....","#...#",".###."],
+ 'D':["####.","#...#","#...#","#...#","#...#","#...#","####."],
+ 'E':["#####","#....","#....","####.","#....","#....","#####"],
+ 'F':["#####","#....","#....","####.","#....","#....","#...."],
+ 'G':[".###.","#...#","#....","#.###","#...#","#...#",".###."],
+ 'H':["#...#","#...#","#...#","#####","#...#","#...#","#...#"],
+ 'I':["#####","..#..","..#..","..#..","..#..","..#..","#####"],
+ 'J':["..###","...#.","...#.","...#.","...#.","#..#.",".##.."],
+ 'K':["#...#","#..#.","#.#..","##...","#.#..","#..#.","#...#"],
+ 'L':["#....","#....","#....","#....","#....","#....","#####"],
+ 'M':["#...#","##.##","#.#.#","#.#.#","#...#","#...#","#...#"],
+ 'N':["#...#","##..#","#.#.#","#..##","#...#","#...#","#...#"],
+ 'O':[".###.","#...#","#...#","#...#","#...#","#...#",".###."],
+ 'P':["####.","#...#","#...#","####.","#....","#....","#...."],
+ 'Q':[".###.","#...#","#...#","#...#","#.#.#","#..#.",".##.#"],
+ 'R':["####.","#...#","#...#","####.","#.#..","#..#.","#...#"],
+ 'S':[".####","#....","#....",".###.","....#","....#","####."],
+ 'T':["#####","..#..","..#..","..#..","..#..","..#..","..#.."],
+ 'U':["#...#","#...#","#...#","#...#","#...#","#...#",".###."],
+ 'V':["#...#","#...#","#...#","#...#","#...#",".#.#.","..#.."],
+ 'W':["#...#","#...#","#...#","#.#.#","#.#.#","##.##","#...#"],
+ 'X':["#...#","#...#",".#.#.","..#..",".#.#.","#...#","#...#"],
+ 'Y':["#...#","#...#",".#.#.","..#..","..#..","..#..","..#.."],
+ 'Z':["#####","....#","...#.","..#..",".#...","#....","#####"],
+ 'Ł':["#....","#..#.","#.#..","##...","#....","#....","#####"],
+ '0':[".###.","#...#","#..##","#.#.#","##..#","#...#",".###."],
+ '1':["..#..",".##..","..#..","..#..","..#..","..#..",".###."],
+ '2':[".###.","#...#","....#","...#.","..#..",".#...","#####"],
+ '3':["####.","....#","....#",".###.","....#","....#","####."],
+ '4':["...#.","..##.",".#.#.","#..#.","#####","...#.","...#."],
+ '5':["#####","#....","####.","....#","....#","#...#",".###."],
+ '6':["..##.",".#...","#....","####.","#...#","#...#",".###."],
+ '7':["#####","....#","...#.","..#..",".#...",".#...",".#..."],
+ '8':[".###.","#...#","#...#",".###.","#...#","#...#",".###."],
+ '9':[".###.","#...#","#...#",".####","....#","...#.",".##.."],
+ ' ':[".....",".....",".....",".....",".....",".....","....."],
+ '!':["..#..","..#..","..#..","..#..","..#..",".....","..#.."],
+ '?':[".###.","#...#","....#","..##.","..#..",".....","..#.."],
+ '.':[".....",".....",".....",".....",".....",".....","..#.."],
+ ',':[".....",".....",".....",".....",".....","..#..",".#..."],
+ ':':[".....","..#..","..#..",".....","..#..","..#..","....."],
+ '-':[".....",".....",".....","#####",".....",".....","....."],
+ '/':["....#","....#","...#.","..#..",".#...","#....","#...."],
+ '<':["...#.","..#..",".#...","#....",".#...","..#..","...#."],
+ '>':[".#...","..#..","...#.","....#","...#.","..#..",".#..."],
+ '^':["..#..",".###.","##.##",".....",".....",".....","....."],
+ 'v':[".....",".....",".....","##.##",".###.","..#..","....."],
+ '*':[".....","#.#.#",".###.","#####",".###.","#.#.#","....."],
+ '%':["##..#","##.#.","...#.","..#..",".#...",".#.##","#..##"],
+ "'":["..#..","..#..",".....",".....",".....",".....","....."],
+ '+':[".....","..#..","..#..","#####","..#..","..#..","....."],
+ '(':["...#.","..#..",".#...",".#...",".#...","..#..","...#."],
+ ')':[".#...","..#..","...#.","...#.","...#.","..#..",".#..."]
+};
+const KRESKA = "...#.", KROPKA = "..#..", OGONEK = "...#.";
+const ZDOBIONE = {
+ 'Ą':['A',null,OGONEK], 'Ć':['C',KRESKA,null], 'Ę':['E',null,OGONEK],
+ 'Ń':['N',KRESKA,null], 'Ó':['O',KRESKA,null], 'Ś':['S',KRESKA,null],
+ 'Ź':['Z',KRESKA,null], 'Ż':['Z',KROPKA,null]
+};
+function glif(zn){
+  if(CZC[zn]) return {rzedy: CZC[zn], gora:null, dol:null};   // np. 'v' = strzałka w dół
+  const duza = zn.toUpperCase();
+  if(CZC[duza]) return {rzedy: CZC[duza], gora:null, dol:null};
+  const z = ZDOBIONE[duza];
+  if(z) return {rzedy: CZC[z[0]], gora:z[1], dol:z[2]};
+  return {rzedy: CZC['?'], gora:null, dol:null};
+}
+const pamiecTekstu = new Map();
+function tekstNaKanwie(t, kol){
+  const klucz = t + ' ' + kol;
+  if(pamiecTekstu.has(klucz)) return pamiecTekstu.get(klucz);
+  const znaki = [...t];
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, znaki.length * 6); c.height = 9;
+  const x = c.getContext('2d');
+  x.fillStyle = kol;
+  znaki.forEach((zn, i) => {
+    const g = glif(zn), ox = i*6;
+    if(g.gora) for(let k=0;k<5;k++) if(g.gora[k]==='#') x.fillRect(ox+k, 0, 1, 1);
+    for(let j=0;j<7;j++) for(let k=0;k<5;k++)
+      if(g.rzedy[j][k]==='#') x.fillRect(ox+k, 1+j, 1, 1);
+    if(g.dol) for(let k=0;k<5;k++) if(g.dol[k]==='#') x.fillRect(ox+k, 8, 1, 1);
+  });
+  if(pamiecTekstu.size > 400) pamiecTekstu.clear();
+  pamiecTekstu.set(klucz, c);
+  return c;
+}
+function szerTekstu(t, skala){ return [...t].length * 6 * (skala||1); }
+function rysujTekst(t, x, y, kol, cien, skala, wyr){
+  skala = Math.max(1, Math.round(skala || 1));
+  const c = tekstNaKanwie(t, kol);
+  const w = c.width*skala, h = c.height*skala;
+  let px = Math.round(x), py = Math.round(y - h/2);
+  if(wyr === 'center') px = Math.round(x - w/2);
+  ctx.imageSmoothingEnabled = false;
+  if(cien) ctx.drawImage(tekstNaKanwie(t, cien), px+skala, py+skala, w, h);
+  ctx.drawImage(c, px, py, w, h);
+}
+function napis(t, x, y, kol, cien, skala){ rysujTekst(t, x, y, kol, cien, skala, 'center'); }
+function napisL(t, x, y, kol, cien, skala){ rysujTekst(t, x, y, kol, cien, skala, 'left'); }
+function ramka(x,y,w,h,tlo){
+  pr(x,y,w,h,'#000000'); pr(x+1,y+1,w-2,h-2,tlo||'#0000bc'); pr(x+2,y+2,w-4,h-4,'#000000');
+  pr(x+3,y+3,w-6,h-6,tlo||'#0000bc');
+}
+
+/* ==================== PLATFORMÓWKA ==================== */
+const GRAW = 0.31, SKOK = 6.9, PREDKOSC = 1.95;
+function zachodzi(a,b){ return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y; }
+
+function aktualizujGre(){
+  const p = POZ()[G.poziom], g = G.gracz;
+  if(G.overlay){ G.overlay.t--; if(G.overlay.t<=0) G.overlay=null; }
+  const blok = !!G.overlay;
+  const lewo = !blok && klaw.ArrowLeft, prawo = !blok && klaw.ArrowRight;
+
+  if(lewo && !prawo){ g.vx = -PREDKOSC; g.kier = -1; }
+  else if(prawo && !lewo){ g.vx = PREDKOSC; g.kier = 1; }
+  else g.vx = 0;
+
+  if(!blok && nowy('ArrowUp')) g.bufor = 10;
+  if(g.bufor>0) g.bufor--;
+  if(g.coyote>0) g.coyote--;
+  if(g.bufor>0 && g.coyote>0){ g.vy = -SKOK; g.bufor=0; g.coyote=0; sfx('sfx_skok'); }
+
+  g.vy += GRAW;
+  if(g.vy > 8.5) g.vy = 8.5;
+
+  g.x += g.vx;
+  for(const pl of p.platformy) if(!pl.przenikalna && zachodzi(g,pl)){
+    if(g.vx>0) g.x = pl.x - g.w; else if(g.vx<0) g.x = pl.x + pl.w;
+  }
+  if(g.x < 0) g.x = 0;
+  if(g.x + g.w > p.szer) g.x = p.szer - g.w;
+
+  g.ziemia = false;
+  const staryDol = g.y + g.h;
+  g.y += g.vy;
+  for(const pl of p.platformy){
+    if(!zachodzi(g,pl)) continue;
+    if(pl.przenikalna){
+      if(g.vy > 0 && staryDol <= pl.y + 1){ g.y = pl.y - g.h; g.vy = 0; g.ziemia = true; }
+    } else if(g.vy>0){ g.y = pl.y - g.h; g.vy=0; g.ziemia=true; }
+    else if(g.vy<0){ g.y = pl.y + pl.h; g.vy=0; }
+  }
+  if(g.ziemia){ g.coyote = 8; g.bezpiecz = {x:g.x, y:g.y-2}; }
+  if(g.y > H + 100){ g.x = g.bezpiecz.x; g.y = g.bezpiecz.y - 20; g.vy = 0; }
+  if(Math.abs(g.vx)>0.1 && g.ziemia) g.chodT += 0.16;
+
+  const cel = Math.max(0, Math.min(p.szer - W, g.x + g.w/2 - W/2));
+  G.kamera += (cel - G.kamera) * 0.12;
+
+  if(p.tata){
+    const t = G.tata;
+    const nast = p.zadania[G.zrobione];
+    const czekaNaPrzytulas = nast && nast.typ === 'przytulas' && !nast.wziete;
+    // przy przytulasie tata staje w jednym miejscu i czeka z otwartymi rękami
+    const celX = czekaNaPrzytulas ? nast.x - 12 : g.x - 38;
+    const celY = czekaNaPrzytulas ? 177        : g.y + g.h - 58;
+    t.x += (celX - t.x) * (czekaNaPrzytulas ? 0.06 : 0.045);
+    t.y += (celY - t.y) * 0.12;
+  }
+
+  if(!blok){
+    for(let i=0;i<p.zadania.length;i++){
+      const z = p.zadania[i];
+      if(z.wziete) continue;
+      const box = {x:z.x-13, y:z.y-14, w:26, h:28};
+      if(!zachodzi(g,box)) continue;
+      if(i !== G.zrobione){
+        if(G.infoT<=0){ sfx('sfx_zle'); pokazInfo('Najpierw ' + tekstZadania(p, G.zrobione).toLowerCase()); mow('zle'); }
+        continue;
+      }
+      z.wziete = true; G.zrobione++;
+      G.ekwipunek.push(z.typ);
+      const slot = z.stroj || z.typ;                 // legginsy -> spodnie, bluza -> koszulka
+      if(z.zdejmij) G.stroj[z.zdejmij] = false;      // w szatni rzeczy się zdejmuje
+      else if(slot in G.stroj) G.stroj[slot] = true;
+      sfx('sfx_zbierz');
+      iskry(z.x, z.y, ['#f8d878','#fffeff','#58d854','#3cbcfc']);
+      const brawo = 'brawo' + (1 + ((Math.random()*4)|0));
+      if(z.typ === 'jogi'){                          // Jogi zjada całą miskę
+        G.overlay = {typ:'karmienie', t:190};
+        serduszka(z.x, z.y - 10, 10);
+        sfx('sfx_hau'); sfx('sfx_sukces'); mow(najlepszyGlos('jogi_je'));
+      }
+      else if(z.typ.startsWith('kwiatek')){          // kropelki wody na kwiatka
+        for(let n=0;n<18;n++) G.czastki.push({x:z.x+(Math.random()-0.5)*22, y:z.y-16,
+          vx:(Math.random()-0.5)*0.8, vy:0.6+Math.random(), zyc:34, kol:'#3cbcfc', r:1+Math.random()});
+        const ostatni = (G.zrobione >= p.zadania.length);
+        if(ostatni){ G.overlay = {typ:'kwiatki', t:170}; mow(najlepszyGlos('kwiatki_ok')); }
+        else mow(brawo, glosZadania(p, G.zrobione));
+      }
+      else mow(brawo, glosZadania(p, G.zrobione));
+      G.ostatnieZadanie = G.zrobione;
+    }
+  }
+
+  if(G.zrobione >= p.zadania.length && !blok){
+    ogloszZadanie(false);
+    const d = p.drzwi;
+    if(zachodzi(g,{x:d.x,y:d.y,w:d.w,h:d.h})){
+      sfx('sfx_sukces'); cisza();
+      iskry(d.x+d.w/2, d.y+d.h/2, ['#f8d878','#fffeff','#58d854'], 26);
+      dalejPoPoziomie();
+    }
+  }
+  aktualizujEfekty();
+  czyscNowe();
+}
+function tekstZadania(p, idx){
+  if(idx >= p.zadania.length) return p.drzwi.zadanie || 'Idź do drzwi!';
+  const z = p.zadania[idx];
+  return z.zadanie || ('Znajdź ' + NAZWY[z.typ] + '!');
+}
+
+/* --- drzwi i samochód --- */
+function rysujDrzwi(d, otwarte, t){
+  if(d.kosz){ rysujKosz(d, otwarte, t); return; }
+  const x=Math.round(d.x), y=Math.round(d.y), w=Math.round(d.w), h=Math.round(d.h);
+  if(otwarte && Math.floor(t/8)%2===0) pr(x-2,y-2,w+4,h+4,'#f8d878');
+  blok(x,y,w,h,otwarte?'#f8d878':'#ac7c00', otwarte?'#e45c10':'#883800','#503000');
+  obrys(x,y,w,h);
+  obrys(x+4,y+5,w-8,h-10);
+  pr(x+w-10,y+Math.round(h/2),3,3,'#f8d878');
+  if(otwarte) strzalka(x+Math.round(w/2), y-14, t);
+}
+function rysujKosz(d, swieci, t){
+  const x=Math.round(d.x), y=Math.round(d.y), w=Math.round(d.w), h=Math.round(d.h);
+  if(swieci && Math.floor(t/8)%2===0) pr(x-3,y-3,w+6,h+6,'#f8d878');
+  blok(x, y+8, w, h-8, '#adadad', '#4f4f4f', '#2b2b33'); obrys(x, y+8, w, h-8);
+  for(let i=6;i<w-4;i+=9) pr(x+i, y+12, 2, h-16, '#2b2b33');
+  const uchyl = swieci ? 6 : 0;                       // przy pełnym worku klapa uchylona
+  pr(x-3, y-uchyl, w+6, 9, '#2b2b33'); obrys(x-3, y-uchyl, w+6, 9);
+  pr(x-3, y-uchyl, w+6, 2, '#4f4f4f');
+  pr(x+Math.round(w/2)-5, y-uchyl-4, 10, 4, '#4f4f4f'); obrys(x+Math.round(w/2)-5, y-uchyl-4, 10, 4);
+  pr(x+4, y+h-6, 3, 6, '#000000'); pr(x+w-7, y+h-6, 3, 6, '#000000');
+  rysujSpr('recykling',[
+    "..k...k..",
+    ".klk.klk.",
+    "kllk.kllk",
+    ".........",
+    "...klk...",
+    "..kllk...",
+    "..kllk..."], x+Math.round(w/2)-4, y+22, false);
+  if(swieci) strzalka(x+Math.round(w/2), y-uchyl-16, t);
+}
+function strzalka(x,y,t){
+  const o = Math.floor(Math.sin(t*0.14)*3);
+  rysujSpr('strz',[
+   "kkkkkkkkk",
+   "kyyyyyyyk",
+   ".kyyyyyk.",
+   "..kyyyk..",
+   "...kyk...",
+   "....k...."], x-4, y+o, false);
+}
+
+function rysujGre(){
+  const p = POZ()[G.poziom], g = G.gracz;
+  TLA[p.tlo](G.kamera, G.t);
+  ctx.save();
+  ctx.translate(-Math.round(G.kamera), 0);
+  for(const pl of p.platformy) rysujPlatforme(pl);
+
+  if(p.tata) rysujTate(G.tata.x, G.tata.y, 1, G.t*0.1);
+
+  for(let i=0;i<p.zadania.length;i++){
+    const z = p.zadania[i];
+    if(z.wziete) continue;
+    const aktualny = (i === G.zrobione);
+    const un = aktualny ? Math.round(Math.sin(G.t*0.09)*2) : 0;
+    if(aktualny){
+      const r = 11 + (Math.floor(G.t/8)%2)*2;
+      for(const [sx,sy] of [[-1,-1],[1,-1],[-1,1],[1,1]])
+        pr(z.x + sx*r - 1, z.y + sy*r - 1 + un, 2, 2, '#f8d878');
+      const rr = 13 + (Math.floor(G.t/8)%2);
+      pr(z.x-1, z.y-rr+un, 2, 2, '#fffeff');
+      pr(z.x-1, z.y+rr-2+un, 2, 2, '#fffeff');
+    }
+    ctx.globalAlpha = aktualny ? 1 : 0.4;
+    rysujIkone(z.typ, z.x, z.y+un, false);
+    ctx.globalAlpha = 1;
+    if(aktualny) strzalka(z.x, z.y - 22 + un, G.t);
+  }
+
+  const otwarte = G.zrobione >= p.zadania.length;
+  rysujDrzwi(p.drzwi, otwarte, G.t);
+  rysujPostac(g.x, g.y, g.kier, g.chodT, !g.ziemia, g.vy>0);
+  rysujEfekty();
+  ctx.restore();
+
+  rysujHUD(p);
+
+  const cel = otwarte ? {x:p.drzwi.x+p.drzwi.w/2} : (p.zadania[G.zrobione] || null);
+  if(cel){
+    const ex = cel.x - G.kamera;
+    if(ex < 20 || ex > W-20){
+      const kx = ex < 20 ? 12 : W-20, kier = ex < 20 ? -1 : 1;
+      const yy = 150 + Math.round(Math.sin(G.t*0.1)*4);
+      ctx.save(); ctx.translate(kx+4, yy); ctx.scale(kier,1);
+      rysujSpr('wsk',["....k....","...kk....","kkkkky...","kyyyyyy..","kkkkky...","...kk....","....k...."],-4,-3,false);
+      ctx.restore();
+    }
+  }
+  if(G.overlay && G.overlay.typ === 'karmienie') rysujKarmienie(G.overlay);
+  if(G.overlay && G.overlay.typ === 'kwiatki')   rysujKwiatki(G.overlay);
+  if(G.infoT > 0){
+    ramka(W/2-110, 232, 220, 24, '#a80020');
+    napis(G.info, W/2, 244, '#f8d878', '#000000', 1);
+  }
+  rysujDebug();
+}
+function rysujKarmienie(o){
+  const post = 1 - o.t/190;
+  ctx.globalAlpha = 0.75; pr(0,0,W,H,'#000000'); ctx.globalAlpha = 1;
+  ramka(W/2-116, 44, 232, 176, '#0000bc');
+  napis('MNIAM! MNIAM!', W/2, 66, '#f8d878', '#000000', 2);
+  const pusta = post > 0.55;
+  ctx.save();
+  ctx.translate(W/2-32, 84); ctx.scale(4,4);
+  ctx.drawImage(spr(pusta ? 'ik_miska' : 'ik_zarcie', pusta ? IKONY.miska : IKONY.zarcie), 0, 0);
+  ctx.restore();
+  // Jogi macha ogonem nad miską
+  const b = (Math.floor(G.t/6)%2) ? 1 : -1;
+  ctx.save();
+  ctx.translate(W/2+34, 120+b); ctx.scale(2,2);
+  ctx.drawImage(spr('ik_jogi', IKONY.jogi), 0, 0);
+  ctx.restore();
+  for(let i=0;i<5;i++){
+    const f = (G.t*0.9 + i*24) % 80;
+    rysujSpr('serduszko', SERDUSZKO, W/2 - 40 + i*22 + Math.sin((G.t+i*18)*0.07)*4, 172 - f*0.8, false);
+  }
+  napis(pusta ? 'MISKA PUSTA! DZIĘKUJĘ!' : 'JOGI SIĘ ZAJADA!', W/2, 206, '#fffeff', '#000000', 1.6);
+}
+function rysujKwiatki(o){
+  const post = 1 - o.t/170;
+  ctx.globalAlpha = 0.72; pr(0,0,W,H,'#000000'); ctx.globalAlpha = 1;
+  ramka(W/2-124, 44, 248, 172, '#007800');
+  napis('PODLANE!', W/2, 66, '#b8f818', '#000000', 2.6);
+  ['kwiatek1','kwiatek2','kwiatek3'].forEach((typ, i) => {
+    const b = Math.round(Math.sin((G.t + i*30)*0.09) * (post > 0.4 ? 2 : 0));
+    ctx.save();
+    ctx.translate(W/2 - 96 + i*64, 84 + b); ctx.scale(3,3);
+    ctx.drawImage(spr('ik_'+typ, IKONY[typ]), 0, 0);
+    ctx.restore();
+  });
+  for(let i=0;i<14;i++){                       // kropelki spadają na kwiatki
+    const f = (G.t*1.4 + i*17) % 70;
+    pr(W/2 - 100 + i*15, 78 + f, 1, 3, '#3cbcfc');
+  }
+  napis(post > 0.5 ? 'KWIATKI SĄ SZCZĘŚLIWE!' : 'CHLUP, CHLUP, CHLUP...', W/2, 202, '#fffeff', '#000000', 1.6);
+}
+function rysujHUD(p){
+  pr(0,0,W,20,'#000000'); pr(0,20,W,1,'#4f4f4f');
+  napisL('POZIOM '+(G.poziom+1)+' - '+p.nazwa.toUpperCase(), 4, 10, '#fffeff', null, 1);
+  const zad = tekstZadania(p, G.zrobione).toUpperCase();
+  const tw = szerTekstu(zad, 2);
+  ramka(W/2-tw/2-8, 24, tw+16, 28, '#a80020');
+  napis(zad, W/2, 38, '#f8d878', '#000000', 2);
+  const n = p.zadania.length;
+  for(let i=0;i<n;i++){
+    const x = W - 14 - (n-1-i)*20, y = 10;
+    const mam = G.ekwipunek.includes(p.zadania[i].typ);
+    ctx.globalAlpha = mam ? 1 : 0.25;
+    ctx.drawImage(spr('ik_'+p.zadania[i].typ, IKONY[p.zadania[i].typ]), x-8, y-8);
+    ctx.globalAlpha = 1;
+  }
+}
+
+
+/* ==================== MINIGRA: WSTAWANIE ====================
+   Wstać wcale nie jest łatwo. Naprzemienne ◀ ▶ wygrzebują Zuzię z łóżka,
+   a sen ciągnie ją z powrotem – co chwilę przychodzi „atak snu", w którym
+   pasek spada dużo szybciej. Budzik dzwoni cichutko, bo tata śpi po
+   wczorajszej imprezie. */
+function startWstawania(){
+  G.wstawanie = { moc:0, ostatni:0, koniecT:0, atak:0, doAtaku:240, tupanie:0, powiedziano:0, czas:0 };
+  G.czastki = []; G.ekran = 'wstawanie';
+  graj('muz_gra');
+  mow(najlepszyGlos('z_wstawanie_jak', 'wstawanie_jak'));
+}
+function aktualizujWstawanie(){
+  const w = G.wstawanie;
+  if(w.koniecT > 0){
+    w.koniecT--;
+    if(w.koniecT === 0) dalejPoPoziomie();
+    aktualizujEfekty(); czyscNowe(); return;
+  }
+  // Po 20 sekundach sen zaczyna odpuszczać – nawet powolne stukanie w końcu
+  // wystarczy, bo w tej grze nie da się przegrać.
+  w.czas++;
+  const ulga = Math.min(1, Math.max(0, (w.czas - 1200)/1800));
+  const kop = 0.075 + 0.05*ulga;
+
+  // naprzemienne stukanie podnosi Zuzię
+  let stuk = false;
+  if(nowy('ArrowLeft')  && w.ostatni !== -1){ w.moc += kop; w.ostatni = -1; stuk = true; }
+  if(nowy('ArrowRight') && w.ostatni !==  1){ w.moc += kop; w.ostatni =  1; stuk = true; }
+  if(klaw.ArrowLeft || klaw.ArrowRight) w.moc += 0.0012;   // samo trzymanie nie wystarczy
+  if(stuk){ w.tupanie = 8; sfx('sfx_skok'); }
+  if(w.tupanie > 0) w.tupanie--;
+
+  // sen ciągnie w dół, a w ataku snu ciągnie mocno
+  if(w.atak > 0){
+    w.atak--;
+    w.moc -= 0.007 - 0.005*ulga;
+    if(G.t % 8 === 0) G.czastki.push({x:150+Math.random()*40, y:150, vx:0.3, vy:-0.5,
+                                      zyc:40, kol:'#c0dfff', r:2});
+  } else {
+    w.moc -= 0.0025 - 0.0018*ulga;
+    if(--w.doAtaku <= 0 && w.moc < 0.94 && ulga < 0.9){
+      w.atak = 80; w.doAtaku = 260 + ((Math.random()*120)|0);
+      sfx('sfx_zle');
+      if(w.powiedziano++ < 2) dopowiedz(najlepszyGlos('wstawanie_spij'));
+    }
+  }
+  w.moc = Math.max(0, Math.min(1, w.moc));
+
+  if(w.moc >= 1 && w.koniecT === 0){
+    w.koniecT = 190; w.atak = 0;
+    sfx('sfx_sukces'); cisza(); mow(najlepszyGlos('z_wstawanie_ok'));
+    iskry(300, 150, ['#f8d878','#fffeff','#58d854'], 30);
+  }
+  aktualizujEfekty(); czyscNowe();
+}
+function rysujWstawanie(){
+  const w = G.wstawanie;
+  const b = bohater(), u = b.ubior;
+  TLA.sypialniaP(0, G.t);
+
+  // podłoga i łóżko
+  pr(0,232,W,H-232,'#ac7c00'); pr(0,232,W,2,'#e45c10');
+  for(let i=0;i<W;i+=18) pr(i,234,1,H-234,'#503000');
+  pr(112,168,224,10,'#ac7c00'); obrys(112,168,224,10);
+  pr(112,178,224,54,'#b71e7b'); obrys(112,178,224,54);
+  pr(118,180,212,10,'#e4e4ee');                       // prześcieradło
+  pr(236,164,64,16,'#fffeff'); obrys(236,164,64,16);  // poduszka
+
+  const drg = w.tupanie > 0 ? (Math.floor(G.t/2)%2 ? 1 : -1) : 0;
+  const siada = Math.min(1, w.moc/0.62);              // najpierw siada na łóżku
+  const wyj   = Math.max(0, (w.moc-0.62)/0.38);       // potem wychodzi na podłogę
+  const ky = 186 + Math.round(w.moc * 18);            // kołdra zsuwa się w dół
+
+  if(wyj <= 0){                                        // jeszcze w łóżku – widać głowę
+    const gy = 174 - Math.round(siada*28) + drg;
+    const gl = obraz(b.glowa);
+    if(gl) ctx.drawImage(gl, 250, gy, b.glowaW, b.glowaH); else pr(250, gy, 24, 22, SKORA);
+    pr(246, gy+b.glowaH-1, 32, 12, u.pizama);
+    pr(246, gy+b.glowaH+2, 32, 2, u.pizamaPas);
+  }
+  // kołdra z przodu – zasłania resztę Zuzi w łóżku
+  pr(112, ky, 224, 48, '#fec4ea');
+  for(let j=0;j<48;j+=8) pr(112, ky+j, 224, 2, '#fe6ecc');
+  obrys(112, ky, 224, 48);
+  if(wyj > 0)                                          // już nad kołdrą – cała Zuzia
+    rysujPostac(272 + Math.round(wyj*76), 150 + Math.round(wyj*32) + drg, -1, 0, false, false);
+
+  // szafka nocna z budzikiem – to on budzi Zuzię, bo tata śpi po imprezie
+  blok(384, 190, 66, 42, '#e45c10', '#ac7c00', '#503000'); obrys(384, 190, 66, 42);
+  pr(390, 204, 54, 1, '#503000');
+  const dzwoni = w.koniecT === 0 && Math.floor(G.t/6)%2===0;
+  const bx = 402 + (dzwoni ? (Math.floor(G.t/3)%2 ? 1 : -1) : 0);
+  pr(bx+2, 154, 8, 6, '#f8d878'); pr(bx+20, 154, 8, 6, '#f8d878');   // dzwonki
+  kolo(bx+15, 172, 16, '#d82800');
+  kolo(bx+15, 172, 13, '#fffeff');
+  pr(bx+14, 163, 2, 10, '#000000');                                  // wskazówki
+  pr(bx+15, 171, 8, 2, '#000000');
+  pr(bx+13, 186, 5, 5, '#a80020'); pr(bx+15, 186, 4, 5, '#a80020');
+  if(dzwoni){
+    napis('DRYN!', bx-24, 150, '#f8d878', '#000000', 1.4);
+    napis('DRYN!', bx+56, 162, '#f8d878', '#000000', 1.4);
+  }
+  if(Math.floor(G.t/90)%2===0 && w.koniecT === 0){
+    const tekst = 'CIIII! TATA ŚPI...';
+    const tw = szerTekstu(tekst, 1);
+    pr(W-tw-14, 208, tw+8, 16, '#000000'); pr(W-tw-12, 210, tw+4, 12, '#fffeff');
+    napis(tekst, W-tw/2-10, 217, '#0000bc', null, 1);
+  }
+
+  if(w.atak > 0 && w.koniecT === 0){
+    ctx.globalAlpha = 0.45; pr(0,0,W,H,'#0000bc'); ctx.globalAlpha = 1;
+    for(let i=0;i<3;i++){
+      const f = (G.t*0.9 + i*30) % 90;
+      napis('Z', 300 + f*0.5, 130 - f*0.6, '#fffeff', '#000000', 1.4 + i*0.4);
+    }
+    napis('NIE ZASYPIAJ!', W/2, 76, '#f8d878', '#a80020', 2.4);
+  }
+  rysujEfekty();
+
+  // HUD: pasek wstawania
+  pr(0,0,W,20,'#000000'); pr(0,20,W,1,'#4f4f4f');
+  napisL('WSTAWAJ, ZUZIU!', 4, 10, '#fffeff', null, 1);
+  pr(88,26,304,18,'#000000'); pr(90,28,300,14,'#4f4f4f');
+  pr(90,28,Math.round(300*w.moc),14, w.moc > 0.75 ? '#58d854' : (w.moc > 0.4 ? '#f8d878' : '#d82800'));
+  napis('WSTAWANIE ' + Math.round(w.moc*100) + '%', W/2, 35, '#fffeff', '#000000', 1);
+
+  if(w.koniecT > 0){
+    napis('WSTAŁAM!', W/2, 70, '#f8d878', '#000000', 4);
+    napis('JOGI CZEKA NA ŚNIADANIE!', W/2, 100, '#d82800', '#000000', 1.6);
+  } else {
+    napis('NACISKAJ  <  >  NA ZMIANĘ', W/2, 258, '#fffeff', '#000000', 1.6);
+  }
+  rysujDebug();
+}
+
+/* ==================== MINIGRA: TEMPEROWANIE KREDEK ====================
+   Pięć kredek do zatemperowania. Kredka stoi w temperówce, a naprzemienne
+   ◀ ▶ kręcą nią w kółko – jak prawdziwym temperowaniem. Z temperówki lecą
+   wiórki, a gotowa kredka wskakuje do kubka. */
+const KREDKI = [
+  {nazwa:'CZERWONA',  kol:'#d82800', kolC:'#a80020'},
+  {nazwa:'NIEBIESKA', kol:'#0058f8', kolC:'#0000bc'},
+  {nazwa:'ZIELONA',   kol:'#00a800', kolC:'#007800'},
+  {nazwa:'ŻÓŁTA',     kol:'#f8d878', kolC:'#bcbe00'},
+  {nazwa:'FIOLETOWA', kol:'#7527fe', kolC:'#4a19a0'}
+];
+const TEMP = {x:210, y:158, w:52, h:42};          // temperówka na biurku
+function startKredek(){
+  G.kredki = { i:0, moc:0, ostatni:0, obrot:0, pokaz:0, koniecT:0, drg:0 };
+  G.czastki = []; G.ekran = 'kredki';
+  graj('muz_gra');
+  mow(najlepszyGlos('kredki_jak'));
+}
+function wiorek(kol){                              // wiórek wypada z temperówki
+  const a = Math.PI*0.15 + Math.random()*Math.PI*0.7;
+  G.czastki.push({x:TEMP.x+8+Math.random()*36, y:TEMP.y+TEMP.h-4,
+    vx:Math.cos(a)*-1.6 + (Math.random()-0.5), vy:-0.9-Math.random()*1.2,
+    zyc:45+Math.random()*25, kol, r:1+Math.random()*2});
+}
+function aktualizujKredki(){
+  const k = G.kredki;
+  if(k.koniecT > 0){
+    k.koniecT--;
+    if(k.koniecT === 0) dalejPoPoziomie();
+    aktualizujEfekty(); czyscNowe(); return;
+  }
+  if(k.drg > 0) k.drg--;
+  if(k.pokaz > 0){                                 // gotowa kredka wjeżdża do kubka
+    k.pokaz--;
+    if(k.pokaz === 0){
+      k.i++;
+      if(k.i >= KREDKI.length){
+        k.koniecT = 200; cisza(); mow(najlepszyGlos('kredki_ok'));
+        iskry(240, 120, ['#f8d878','#fffeff','#fe6ecc','#3cbcfc'], 34);
+      } else { k.moc = 0; k.ostatni = 0; dopowiedz(najlepszyGlos('kredka_gotowa')); }
+    }
+    aktualizujEfekty(); czyscNowe(); return;
+  }
+
+  const kr = KREDKI[k.i];
+  let stuk = false;
+  if(nowy('ArrowLeft')  && k.ostatni !== -1){ k.moc += 0.042; k.ostatni = -1; stuk = true; }
+  if(nowy('ArrowRight') && k.ostatni !==  1){ k.moc += 0.042; k.ostatni =  1; stuk = true; }
+  if(klaw.ArrowLeft || klaw.ArrowRight) k.moc += 0.0009;     // samo trzymanie ledwie kręci
+  if(stuk){
+    k.obrot += 1; k.drg = 6;
+    sfx('sfx_zbierz');
+    wiorek(kr.kol); wiorek('#f7d8a5');
+  }
+  k.moc = Math.max(0, Math.min(1, k.moc));
+
+  if(k.moc >= 1){
+    k.pokaz = 80; k.moc = 1;
+    sfx('sfx_sukces');
+    iskry(236, 96, [kr.kol, '#fffeff', '#f8d878'], 18);
+  }
+  aktualizujEfekty(); czyscNowe();
+}
+/* kredka pionowo: czubek u dołu, papierowa banderola w środku */
+function rysujKredkePion(cx, gora, dl, kol, kolC, ostrosc, obrot){
+  const x = Math.round(cx) - 5, y = Math.round(gora);
+  const czub = Math.round(6 + ostrosc*8);          // im ostrzejsza, tym dłuższy czubek
+  const trzon = Math.max(6, Math.round(dl - czub));
+  pr(x, y, 10, trzon, kol);
+  pr(x, y, 2, trzon, kolC);
+  pr(x+8, y, 2, trzon, kolC);
+  pr(x, y, 10, 2, kolC);
+  // banderola – jej paski przesuwają się przy kręceniu, więc widać obrót
+  const bw = Math.round(trzon*0.34);
+  const by = y + Math.round(trzon*0.30);
+  pr(x, by, 10, bw, '#fffeff');
+  for(let i=0;i<10;i+=3) pr(x + ((i + Math.round(obrot)) % 10), by, 1, bw, kolC);
+  pr(x, by, 10, 1, '#bcbcbc'); pr(x, by+bw-1, 10, 1, '#bcbcbc');
+  // drewniany czubek schodkami
+  const yc = y + trzon;
+  for(let j=0;j<czub;j++){
+    const szer = Math.max(1, Math.round(10 - (j+1)*(9/czub)));
+    pr(x + Math.floor((10-szer)/2), yc + j, szer, 1, j < 2 ? kol : '#f7d8a5');
+  }
+  if(ostrosc > 0.6){                               // widać grafit na samym końcu
+    const gw = Math.max(1, Math.round(3*ostrosc));
+    pr(x + 5 - Math.floor(gw/2), yc + czub - Math.round(3*ostrosc), gw, Math.round(3*ostrosc), kolC);
+  }
+  obrys(x, y, 10, trzon);
+}
+function rysujTemperowke(drg){
+  const x = TEMP.x + drg, y = TEMP.y, w = TEMP.w, h = TEMP.h;
+  blok(x, y, w, h, '#c0dfff', '#64b0ff', '#0058f8'); obrys(x, y, w, h);
+  pr(x+4, y+6, w-8, h-14, '#3cbcfc');
+  pr(x + Math.round(w/2) - 8, y - 4, 16, 8, '#000000');      // otwór na kredkę
+  pr(x + Math.round(w/2) - 6, y - 2, 12, 6, '#503000');
+  pr(x+6, y+h-12, w-12, 4, '#bcbcbc');                        // ostrze
+  pr(x+6, y+h-12, w-12, 1, '#fffeff');
+  pr(x+10, y+h-6, w-20, 4, '#000000');                        // wylot wiórków
+}
+function rysujKredki(){
+  const k = G.kredki;
+  TLA.sypialniaP(0, G.t);
+  // biurko
+  pr(0, 200, W, 10, '#e45c10'); pr(0, 200, W, 2, '#f7d8a5'); obrys(-1, 200, W+2, 10);
+  pr(40, 210, 12, 60, '#ac7c00'); pr(420, 210, 12, 60, '#ac7c00');
+  pr(0, 210, W, 60, '#883800');
+  for(let i=0;i<W;i+=22) pr(i, 210, 1, 60, '#503000');
+
+  // kredki, które jeszcze czekają – stoją w kubku po lewej
+  for(let i = k.i + (k.pokaz>0?1:0); i < KREDKI.length; i++){
+    const kr = KREDKI[i], x = 40 + (i - k.i)*13;
+    rysujKredkePion(x, 134 - (i%2)*6, 56, kr.kol, kr.kolC, 0.14, 0);
+  }
+  blok(28, 172, 76, 30, '#c0dfff', '#64b0ff', '#0058f8'); obrys(28, 172, 76, 30);
+  napis('DO ZROBIENIA', 66, 190, '#0000bc', null, 1);
+  // kubek na gotowe kredki
+  const gotowych = k.i + (k.pokaz>0 && k.pokaz<50 ? 1 : 0);
+  for(let i=0;i<Math.min(gotowych, KREDKI.length);i++){
+    const kr = KREDKI[i];
+    rysujKredkePion(352 + i*13, 128 - (i%2)*6, 56, kr.kol, kr.kolC, 1, 0);
+  }
+  blok(340, 170, 76, 32, '#f8d878', '#ea9e22', '#883800'); obrys(340, 170, 76, 32);
+  napis('GOTOWE', 378, 190, '#503000', null, 1);
+
+  const drg = k.drg > 0 ? (Math.floor(G.t/2)%2 ? 1 : -1) : 0;
+  rysujTemperowke(drg);
+
+  // aktualna kredka nad temperówką
+  if(k.i < KREDKI.length && k.koniecT === 0){
+    const kr = KREDKI[k.i];
+    const wyzej = k.pokaz > 0 ? Math.round((80 - k.pokaz) * 0.6) : 0;
+    const lot = k.pokaz > 0 && k.pokaz < 50 ? (50 - k.pokaz)/50 : 0;
+    const cx = 236 + drg + Math.round(lot*120);
+    const gora = 66 - wyzej + Math.round(lot*40);
+    rysujKredkePion(cx, gora, 96, kr.kol, kr.kolC, k.moc, k.obrot);
+    if(k.pokaz === 0){                              // rączka Zuzi trzyma kredkę
+      const ky = 80 + (Math.floor(G.t/6)%2)*2;
+      pr(cx-9+drg, ky, 8, 6, SKORA); pr(cx-9+drg, ky, 8, 2, '#ffe4dc');
+      pr(cx+2+drg, ky+2, 8, 6, SKORA); pr(cx+2+drg, ky+2, 8, 2, '#ffe4dc');
+    }
+  }
+  rysujEfekty();
+
+  // Zuzia stoi przy biurku
+  rysujPostac(136, 150, 1, 0, false, false);
+
+  // HUD
+  pr(0,0,W,20,'#000000'); pr(0,20,W,1,'#4f4f4f');
+  napisL('TEMPERUJEMY KREDKI', 4, 10, '#fffeff', null, 1);
+  napisL('KREDKA ' + Math.min(k.i+1, KREDKI.length) + ' z ' + KREDKI.length, W-100, 10, '#f8d878', null, 1);
+  if(k.koniecT > 0){
+    napis('WSZYSTKIE OSTRE!', W/2, 60, '#f8d878', '#000000', 3);
+    napis('BRAWO ZUZIU!', W/2, 92, '#d82800', '#000000', 2);
+  } else {
+    const kr = KREDKI[Math.min(k.i, KREDKI.length-1)];
+    ramka(88, 24, 304, 28, '#a80020');
+    napis(kr.nazwa + '  ' + Math.round(k.moc*100) + '%', 240, 38, '#f8d878', '#000000', 2);
+    pr(88,222,304,18,'#000000'); pr(90,224,300,14,'#4f4f4f');
+    pr(90,224,Math.round(300*k.moc),14, kr.kol);
+    napis(k.pokaz > 0 ? 'OSTRA JAK IGIEŁKA!' : 'NACISKAJ  <  >  NA ZMIANĘ', W/2, 258, '#fffeff', '#000000', 1.6);
+  }
+  rysujDebug();
+}
+
+/* ==================== MINIGRA: MYCIE PODŁOGI ====================
+   Mop jeździ za strzałkami ◀ ▶, a plamy schodzą od ruchu – samo stanie nad
+   plamą nic nie daje, trzeba szorować tam i z powrotem. */
+const PLAMY_START = [
+  {x: 96, y:226, r:16}, {x:150, y:250, r:13}, {x:196, y:218, r:12},
+  {x:244, y:244, r:17}, {x:292, y:222, r:13}, {x:330, y:252, r:12},
+  {x:376, y:230, r:15}, {x:420, y:248, r:12}, {x: 62, y:246, r:11}
+];
+function startPodlogi(){
+  G.podloga = {
+    x: 70, poprz: 70, kier: 1, koniecT: 0, chlup: 0, powiedziano: 0,
+    plamy: PLAMY_START.map(p => ({...p, brud: 1}))
+  };
+  G.czastki = []; G.ekran = 'podloga';
+  graj('muz_gra');
+  mow(najlepszyGlos('podloga_jak'));
+}
+function czystoscPodlogi(p){
+  const suma = p.plamy.reduce((s,z) => s + z.brud, 0);
+  return 1 - suma / p.plamy.length;
+}
+function aktualizujPodloge(){
+  const p = G.podloga;
+  if(p.koniecT > 0){
+    p.koniecT--;
+    if(p.koniecT === 0) dalejPoPoziomie();
+    aktualizujEfekty(); czyscNowe(); return;
+  }
+  p.poprz = p.x;
+  if(klaw.ArrowLeft  && !klaw.ArrowRight){ p.x -= 2.6; p.kier = -1; }
+  if(klaw.ArrowRight && !klaw.ArrowLeft ){ p.x += 2.6; p.kier =  1; }
+  p.x = Math.max(40, Math.min(W-40, p.x));
+  const ruch = Math.abs(p.x - p.poprz);
+
+  if(ruch > 0.5){
+    const mx = p.x + p.kier*14;                    // mop idzie przed Zuzią
+    for(const z of p.plamy){
+      if(z.brud <= 0) continue;
+      const d = Math.abs(z.x - mx);
+      if(d > z.r + 20) continue;
+      const bylo = z.brud;
+      // szerokie, płaskie „zamiatanie": brzeg mopa też coś daje, więc plama
+      // schodzi do zera, a nie asymptotycznie w nieskończoność
+      z.brud -= ruch * 0.016 * (0.4 + 0.6*(1 - d/(z.r+22)));
+      if(z.brud < 0.02) z.brud = 0;
+      if(bylo > 0 && z.brud <= 0){
+        sfx('sfx_zbierz');
+        iskry(z.x, z.y, ['#fffeff','#c0dfff','#3cbcfc'], 12);
+      }
+    }
+    if(G.t % 6 === 0 && Math.random() < 0.7)       // kropelki wody spod mopa
+      G.czastki.push({x:p.x + p.kier*14 + (Math.random()-0.5)*24, y:236,
+        vx:(Math.random()-0.5)*1.2, vy:-0.7-Math.random(), zyc:24, kol:'#3cbcfc', r:1});
+  }
+  const cz = czystoscPodlogi(p);
+  if(p.powiedziano === 0 && cz > 0.5){ p.powiedziano = 1; dopowiedz(najlepszyGlos('brawo3')); }
+  if(p.plamy.every(z => z.brud <= 0)){
+    p.koniecT = 200; cisza();
+    sfx('sfx_sukces'); mow(najlepszyGlos('podloga_ok'));
+    iskry(240, 200, ['#fffeff','#c0dfff','#f8d878'], 34);
+  }
+  aktualizujEfekty(); czyscNowe();
+}
+function rysujPlame(z){
+  if(z.brud <= 0) return;
+  ctx.globalAlpha = Math.min(1, z.brud);
+  const cx = Math.round(z.x), cy = Math.round(z.y), r = z.r;
+  for(let j=-Math.round(r*0.55); j<=Math.round(r*0.55); j++){
+    const pol = Math.round(Math.sqrt(Math.max(0, r*r*0.31 - j*j)) * 1.8);
+    if(pol < 1) continue;
+    pr(cx-pol, cy+j, pol*2, 1, '#883800');
+  }
+  pr(cx-Math.round(r*0.5), cy-Math.round(r*0.4), Math.round(r*0.5), 2, '#ac7c00');
+  pr(cx+Math.round(r*0.2), cy+Math.round(r*0.2), Math.round(r*0.4), 2, '#503000');
+  ctx.globalAlpha = 1;
+}
+function rysujPodloge(){
+  const p = G.podloga;
+  TLA.kuchnia(0, G.t);
+  // podłoga w perspektywie – od 200 w dół
+  pr(0, 200, W, H-200, '#ac7c00'); pr(0, 200, W, 2, '#e45c10');
+  for(let i=0;i<W;i+=26) pr(i, 202, 1, H-202, '#503000');
+  for(let j=214;j<H;j+=18) pr(0, j, W, 1, '#8a5a20');
+
+  // wiadro z wodą
+  const chlup = Math.round(Math.sin(G.t*0.12)*1);
+  blok(14, 214, 34, 30, '#e4e594', '#bcbcbc', '#4f4f4f'); obrys(14, 214, 34, 30);
+  pr(17, 217+chlup, 28, 8, '#3cbcfc'); pr(17, 217+chlup, 28, 2, '#c0dfff');
+  pr(12, 208, 38, 4, '#4f4f4f');
+
+  for(const z of p.plamy) rysujPlame(z);
+  rysujEfekty();
+
+  // Zuzia z mopem
+  const zx = Math.round(p.x) - 11;
+  const mx = Math.round(p.x + p.kier*14);
+  // kij mopa
+  const gx = Math.round(p.x + p.kier*9);
+  for(let j=0;j<58;j++){
+    const t = j/57;
+    pr(Math.round(gx + (mx-gx)*t), 178 + j, 3, 1, '#ac7c00');
+  }
+  rysujPostac(zx, 150, p.kier, G.t*0.12, false, false);
+  // głowica mopa
+  pr(mx-17, 234, 34, 7, '#0058f8'); obrys(mx-17, 234, 34, 7);
+  for(let i=0;i<32;i+=3){
+    const dl = 7 + ((i + Math.floor(G.t/3)) % 4);
+    pr(mx-16+i, 241, 2, dl, '#fffeff');
+  }
+
+  // HUD
+  const cz = czystoscPodlogi(p);
+  pr(0,0,W,20,'#000000'); pr(0,20,W,1,'#4f4f4f');
+  napisL('MYJEMY PODŁOGĘ', 4, 10, '#fffeff', null, 1);
+  pr(88,26,304,18,'#000000'); pr(90,28,300,14,'#4f4f4f');
+  pr(90,28,Math.round(300*cz),14, cz > 0.75 ? '#58d854' : (cz > 0.4 ? '#f8d878' : '#d82800'));
+  napis('CZYSTOŚĆ ' + Math.round(cz*100) + '%', W/2, 35, '#fffeff', '#000000', 1);
+  if(p.koniecT > 0){
+    napis('PODŁOGA LŚNI!', W/2, 76, '#f8d878', '#000000', 3);
+    napis('BRAWO ZUZIU!', W/2, 108, '#d82800', '#000000', 2);
+  } else {
+    napis('JEŹDŹ  <  >  I ZMYWAJ PLAMY', W/2, 258, '#fffeff', '#000000', 1.6);
+  }
+  rysujDebug();
+}
+
+/* ==================== MINIGRA: NIE OBUDŹ TATY ====================
+   Tata śpi na kanapie po wczorajszej imprezie w Teatrze Leśnym. Kiedy chrapie
+   – można iść.
+   Kiedy przestaje chrapać i się wierci – trzeba stanąć jak myszka, bo
+   inaczej rośnie hałas. Obudzić się nie da: przy pełnym hałasie tata tylko
+   mruczy i Zuzia cofa się kawałek. */
+const CICHO_OD = 24, CICHO_DO = 404;
+function startCicho(){
+  G.cicho = { p:0, chrapie:true, licznik:170, halas:0, koniecT:0, ups:0,
+              mrug:0, powiedziano:0, chrapT:0 };
+  G.czastki = []; G.ekran = 'cicho';
+  graj('muz_gra');
+  mow(najlepszyGlos('cicho_jak'));
+}
+function aktualizujCicho(){
+  const c = G.cicho;
+  if(c.koniecT > 0){
+    c.koniecT--;
+    if(c.koniecT === 0) dalejPoPoziomie();
+    aktualizujEfekty(); czyscNowe(); return;
+  }
+  if(c.ups > 0){                                   // chwila przerwy po hałasie
+    c.ups--;
+    aktualizujEfekty(); czyscNowe(); return;
+  }
+  c.chrapT++;
+  if(--c.licznik <= 0){
+    c.chrapie = !c.chrapie;
+    // chrapanie trwa dłużej niż cisza, żeby dało się iść spokojnie
+    c.licznik = c.chrapie ? (150 + ((Math.random()*130)|0)) : (95 + ((Math.random()*70)|0));
+    if(!c.chrapie){ sfx('sfx_zle'); if(c.powiedziano++ < 2) dopowiedz(najlepszyGlos('cicho_stop')); }
+  }
+
+  const idzie = klaw.ArrowRight && !klaw.ArrowLeft;
+  const cofa  = klaw.ArrowLeft  && !klaw.ArrowRight;
+  if(idzie) c.p += 0.0030;
+  if(cofa)  c.p -= 0.0030;
+  c.p = Math.max(0, Math.min(1, c.p));
+
+  if(!c.chrapie && (idzie || cofa)){
+    c.halas += 0.016;
+    if(G.t % 7 === 0) G.czastki.push({x:CICHO_OD + c.p*(CICHO_DO-CICHO_OD), y:180,
+      vx:(Math.random()-0.5), vy:-1.1, zyc:26, kol:'#d82800', r:2});
+  } else {
+    c.halas -= 0.006;
+  }
+  c.halas = Math.max(0, Math.min(1, c.halas));
+
+  if(c.halas >= 1){
+    c.halas = 0; c.ups = 130; c.mrug = 130;
+    c.p = Math.max(0, c.p - 0.3);
+    c.chrapie = true; c.licznik = 220;
+    sfx('sfx_bum'); cisza(); mow(najlepszyGlos('cicho_ups'));
+  }
+  if(c.p >= 1){
+    c.koniecT = 220; cisza();
+    sfx('sfx_sukces'); mow(najlepszyGlos('cicho_ok'));
+    iskry(CICHO_DO, 170, ['#f8d878','#fffeff','#58d854'], 26);
+  }
+  aktualizujEfekty(); czyscNowe();
+}
+function rysujSpiacegoTate(t, chrapie){
+  // kanapa
+  blok(248, 150, 172, 26, '#fe8170', '#a80020', '#6e0040'); obrys(248, 150, 172, 26);
+  pr(248, 176, 172, 44, '#b71e7b'); obrys(248, 176, 172, 44);
+  pr(240, 140, 16, 80, '#a80020'); obrys(240, 140, 16, 80);
+  pr(412, 140, 16, 80, '#a80020'); obrys(412, 140, 16, 80);
+  // poduszka + głowa taty
+  pr(262, 152, 44, 20, '#fffeff'); obrys(262, 152, 44, 20);
+  const gl = obraz('glowa_tata');
+  const przech = chrapie ? 0 : (Math.floor(t/10)%2 ? 1 : 0);
+  if(gl) ctx.drawImage(gl, 270, 142 + przech, 22, 26);
+  else { pr(270, 142+przech, 22, 26, SKORA); }
+  // koc w kratkę
+  pr(294, 158, 122, 24, '#0058f8'); obrys(294, 158, 122, 24);
+  for(let i=0;i<122;i+=14) pr(294+i, 158, 2, 24, '#3cbcfc');
+  for(let j=0;j<24;j+=8) pr(294, 158+j, 122, 2, '#3cbcfc');
+  // stopy wystają spod koca
+  pr(394, 162, 12, 8, SKORA); obrys(394, 162, 12, 8);
+  if(chrapie){
+    for(let i=0;i<3;i++){
+      const f = (t*0.8 + i*30) % 90;
+      napis('Z', 302 + f*0.55, 138 - f*0.5, '#fffeff', '#000000', 1.1 + i*0.35);
+    }
+  }
+}
+function rysujBalagan(){                            // pamiątki po wczorajszej imprezie
+  // plakat z koncertu w Teatrze Leśnym – dowód rzeczowy
+  pr(64, 96, 78, 62, '#000000'); pr(66, 98, 74, 58, '#f8d878');
+  pr(66, 98, 74, 12, '#007800');
+  napis('TEATR', 103, 106, '#b8f818', null, 1);
+  napis('LEŚNY', 103, 120, '#503000', null, 1);
+  for(const x of [74, 90, 106, 122]) pr(x, 128, 10, 16, '#00a800');   // sosny
+  for(const x of [74, 90, 106, 122]) pr(x+4, 144, 2, 6, '#503000');
+  napis('WCZORAJ!', 103, 152, '#a80020', null, 1);
+  // bilet, który tata zgubił po drodze
+  pr(158, 228, 38, 13, '#fffeff'); obrys(158, 228, 38, 13);
+  pr(188, 228, 1, 13, '#bcbcbc');
+  napis('BILET', 176, 236, '#a80020', null, 1);
+  for(const [x,y,kol] of [[70,214,'#fe6ecc'],[140,222,'#3cbcfc'],[196,216,'#f8d878'],[352,226,'#58d854']]){
+    pr(x, y, 10, 12, kol); pr(x+1, y+1, 3, 4, '#fffeff'); obrys(x, y, 10, 12);   // kubki
+  }
+  for(const [x,y,kol] of [[104,80,'#d82800'],[186,64,'#f8d878'],[404,74,'#58d854']]){
+    const b = Math.round(Math.sin((G.t + x)*0.03)*3);
+    kolo(x, y+b, 9, kol); pr(x-1, y+9+b, 2, 4, kol);
+    pr(x-3, y-4+b, 3, 3, '#fffeff');
+    pr(x, y+13+b, 1, 16, '#bcbcbc');
+  }
+  for(let i=0;i<26;i++){                             // konfetti na podłodze
+    const x = (i*79) % W, y = 236 + (i*13) % 26;
+    pr(x, y, 2, 2, ['#d82800','#f8d878','#58d854','#3cbcfc','#fe6ecc'][i%5]);
+  }
+}
+function rysujCicho(){
+  const c = G.cicho;
+  TLA.salon(0, G.t);
+  ctx.globalAlpha = 0.42; pr(0,0,W,H,'#0000bc'); ctx.globalAlpha = 1;
+  pr(0, 220, W, H-220, '#8a5a20'); pr(0, 220, W, 2, '#ac7c00');
+  for(let i=0;i<W;i+=24) pr(i, 222, 1, H-222, '#503000');
+  rysujBalagan();
+  rysujSpiacegoTate(c.chrapT, c.chrapie && c.koniecT === 0);
+
+  // drzwi na końcu drogi
+  const otw = c.p > 0.9;
+  blok(436, 150, 40, 70, otw ? '#f8d878' : '#ac7c00', otw ? '#e45c10' : '#883800', '#503000');
+  obrys(436, 150, 40, 70); obrys(440, 155, 32, 60);
+  pr(468, 184, 3, 3, '#f8d878');
+
+  // Zuzia na paluszkach
+  const zx = Math.round(CICHO_OD + c.p*(CICHO_DO-CICHO_OD)) - 11;
+  const idzie = (klaw.ArrowLeft || klaw.ArrowRight) && c.ups === 0 && c.koniecT === 0;
+  rysujPostac(zx, 170, klaw.ArrowLeft && !klaw.ArrowRight ? -1 : 1,
+              idzie ? G.t*0.09 : 0, false, false);
+  if(!idzie && c.koniecT === 0 && c.ups === 0 && !c.chrapie)
+    napis('!', zx+11, 160, '#f8d878', '#000000', 1.6);
+  rysujEfekty();
+
+  // dymek z chrapaniem albo cisza
+  if(c.koniecT === 0){
+    const zielono = c.chrapie;
+    const tekst = zielono ? 'CHRRR...  IDŹ!' : 'CICHO! STÓJ!';
+    const tw = szerTekstu(tekst, 2);
+    ramka(W/2-tw/2-10, 62, tw+20, 30, zielono ? '#007800' : '#a80020');
+    napis(tekst, W/2, 78, zielono ? '#b8f818' : '#f8d878', '#000000', 2);
+    // pasek: ile jeszcze trwa ta faza
+    const dl = Math.max(0, Math.min(1, c.licznik/120));
+    pr(W/2-60, 96, 120, 5, '#000000');
+    pr(W/2-59, 97, Math.round(118*dl), 3, zielono ? '#58d854' : '#d82800');
+  }
+
+  // HUD
+  pr(0,0,W,20,'#000000'); pr(0,20,W,1,'#4f4f4f');
+  napisL('NIE OBUDŹ TATY!', 4, 10, '#fffeff', null, 1);
+  napisL('HAŁAS', 250, 10, '#fffeff', null, 1);
+  pr(288,4,150,12,'#4f4f4f');
+  pr(289,5,Math.round(148*c.halas),10, c.halas > 0.7 ? '#d82800' : (c.halas > 0.4 ? '#f8d878' : '#58d854'));
+  pr(4,26,W-8,8,'#000000');
+  pr(5,27,Math.round((W-10)*c.p),6,'#58d854');
+
+  if(c.ups > 0 && c.koniecT === 0){
+    ctx.globalAlpha = 0.5; pr(0,0,W,H,'#a80020'); ctx.globalAlpha = 1;
+    napis('UPS! PRAWIE SIĘ OBUDZIŁ!', W/2, 116, '#f8d878', '#000000', 2.2);
+    napis('CICHUTKO, OD NOWA...', W/2, 142, '#fffeff', '#000000', 1.4);
+  } else if(c.koniecT > 0){
+    napis('UDAŁO SIĘ!', W/2, 72, '#f8d878', '#000000', 3);
+    napis('TATA ŚPI DALEJ. LECIMY DO SZKOŁY!', W/2, 104, '#fffeff', '#000000', 1.4);
+  } else {
+    napis('>  IDŹ      <  COFNIJ SIĘ', W/2, 258, '#fffeff', '#000000', 1.6);
+  }
+  rysujDebug();
+}
+
+/* ==================== EKRANY ==================== */
+function rysujPortret(nazwa, cx, dolY, maxW, maxH){
+  const im = obraz(nazwa);
+  if(!im || !im.naturalWidth) return false;
+  let s = 3;
+  while(s > 1 && (im.naturalWidth*s > maxW || im.naturalHeight*s > maxH)) s--;
+  const w = im.naturalWidth*s, h = im.naturalHeight*s;
+  ctx.drawImage(im, Math.round(cx - w/2), Math.round(dolY - h), w, h);
+  return true;
+}
+function rysujIntro(){
+  pr(0,0,W,H,'#0000bc');
+  for(let i=0;i<50;i++){
+    const x=(i*97)%W, y=(i*53)%150;
+    if(Math.floor(G.t/12+i)%3===0) pr(x,y,1,1,'#fffeff');
+  }
+  pr(0,200,W,H-200,'#007800'); pr(0,200,W,3,'#58d854');
+  for(let i=0;i<W;i+=6) pr(i,197,3,4,'#b8f818');
+  slonce(398,22,30);
+  rysujSpr('ch',CHMURA, 60, 30, false); rysujSpr('ch',CHMURA, 150, 96, false);
+
+  const boh = bohater();
+  napis('PORANEK', 300, 46, '#f8d878', '#000000', 4);
+  napis('ZUZI', 300, 84, '#fe6ecc', '#000000', 4);
+
+  const b = Math.floor(Math.sin(G.t*0.05)*2);
+  if(!rysujPortret(boh.portret, 68, 206+b, 92, 92)) rysujPostac(44, 150+b, 1, 0, false, false);
+
+  ramka(122, 116, 348, 58, '#0000bc');
+  napis('NAKARM JOGIEGO, ZATEMPERUJ KREDKI,', 296, 130, '#fffeff', null, 1);
+  napis('UMYJ PODŁOGĘ, WYRZUĆ ŚMIECI,', 296, 144, '#fffeff', null, 1);
+  napis('PODLEJ KWIATKI I LEĆ DO SZKOŁY!', 296, 158, '#fffeff', null, 1);
+
+  if(Math.floor(G.t/20)%2===0) napis('NACIŚNIJ  ^  ŻEBY ZACZĄĆ', 296, 224, '#f8d878', '#000000', 2);
+  napis('<  >  CHODZENIE        ^  SKOK', 296, 252, '#c0dfff', '#000000', 1);
+}
+function rysujKarte(){
+  pr(0,0,W,H,'#0000bc');
+  const p = POZ()[G.poziom];
+  ramka(60, 80, 360, 110, '#000000');
+  napis('POZIOM '+(G.poziom+1), W/2, 104, '#bcbcbc', null, 1.4);
+  napis(p.nazwa.toUpperCase(), W/2, 132, '#f8d878', '#000000', 2.4);
+  napis(p.podtytul.toUpperCase(), W/2, 162, '#3cbcfc', null, 1.3);
+  if(G.kartaT>60 && Math.floor(G.t/20)%2===0) napis('NACIŚNIJ  ^', W/2, 220, '#fffeff', '#000000', 1.6);
+  rysujDebug();
+}
+function rysujKoniec(){
+  pr(0,0,W,H,'#5c94fc');
+  slonce(40,20,34);
+  pr(0,180,W,H-180,'#00a800'); pr(0,180,W,3,'#58d854');
+  // budynek szkoły
+  pr(266,26,168,154,'#f7d8a5'); obrys(266,26,168,154);
+  ctx.fillStyle='#a80020';
+  ctx.beginPath(); ctx.moveTo(254,28); ctx.lineTo(350,-14); ctx.lineTo(446,28); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle='#000000'; ctx.lineWidth=1; ctx.stroke();
+  for(const [x,y] of [[286,58],[330,58],[374,58],[286,104],[374,104]]){
+    pr(x,y,34,30,'#64b0ff'); obrys(x,y,34,30);
+    pr(x+16,y,2,30,'#fffeff'); pr(x,y+14,34,2,'#fffeff');
+  }
+  pr(330,110,40,70,'#503000'); obrys(330,110,40,70);   // drzwi
+  pr(360,146,4,4,'#f8d878');
+  kolo(350,20,13,'#fffeff'); kolo(350,20,10,'#0000bc');  // zegar na wieżyczce
+  pr(349,13,2,8,'#fffeff'); pr(350,19,6,2,'#fffeff');
+  pr(306, 90, 88, 15, '#fffeff'); obrys(306, 90, 88, 15);
+  napis('SZKOŁA', 350, 99, '#a80020', null, 1.6);
+
+  const b = Math.floor(Math.sin(G.t*0.08)*2);
+  const boh = bohater();
+  if(!rysujPortret(boh.portret, 78, 186+b, 92, 92)) rysujPostac(54, 130+b, 1, 0, false, false);
+  // Jogi odprowadza Zuzię wzrokiem
+  ctx.save(); ctx.translate(150, 152-b); ctx.scale(2.4,2.4);
+  ctx.drawImage(spr('ik_jogi', IKONY.jogi), 0, 0);
+  ctx.restore();
+
+  napis('BRAWO ZUZIU!', W/2, 204, '#f8d878', '#000000', 3);
+  napis('WSZYSTKO ZROBIONE I ZDĄŻYŁAŚ DO SZKOŁY!', W/2, 228, '#fffeff', '#000000', 1);
+  if(Math.floor(G.t/20)%2===0) napis('NACIŚNIJ  ^  ŻEBY ZAGRAĆ JESZCZE RAZ', W/2, 250, '#fffeff', '#000000', 1);
+  rysujEfekty();
+}
+
+/* ==================== PĘTLA GŁÓWNA ==================== */
+let ostatni = 0, akum = 0;
+function petla(ts){
+  requestAnimationFrame(petla);
+  if(!ostatni) ostatni = ts;
+  let dt = (ts - ostatni)/1000; ostatni = ts;
+  if(dt > 0.25) dt = 0.25;
+  akum += dt;
+  let kroki = 0;
+  while(akum >= 1/60 && kroki < 5){ akum -= 1/60; krok(); kroki++; }
+  rysuj();
+}
+let ostatniEkranPrzyciskow = null;
+const ETAPY_DWA_KCIUKI = ['wstawanie','kredki','podloga'];
+function odswiezPrzyciski(){
+  if(G.ekran === ostatniEkranPrzyciskow) return;
+  ostatniEkranPrzyciskow = G.ekran;
+  document.body.classList.toggle('wMenu', G.ekran === 'intro');
+  // etapy, w których ◀ i ▶ idą do obu krawędzi – gra się dwoma kciukami
+  document.body.classList.toggle('dwaKciuki', ETAPY_DWA_KCIUKI.includes(G.ekran));
+}
+function krok(){
+  G.t++;
+  odswiezPrzyciski();
+  switch(G.ekran){
+    case 'intro':
+      if(nowy('ArrowUp')){ sfx('sfx_sukces'); nowaGra(); kartaPoziomu(0); }
+      czyscNowe(); break;
+    case 'karta':
+      G.kartaT++;
+      if(G.kartaT > 60 && (nowy('ArrowUp')||nowy('ArrowRight')||nowy('ArrowLeft'))) startPoziomu(G.poziom);
+      else if(G.kartaT > 260) startPoziomu(G.poziom);
+      czyscNowe(); break;
+    case 'gra': aktualizujGre(); break;
+    case 'wstawanie': aktualizujWstawanie(); break;
+    case 'kredki': aktualizujKredki(); break;
+    case 'podloga': aktualizujPodloge(); break;
+    case 'cicho': aktualizujCicho(); break;
+    case 'koniec':
+      if(G.t % 5 === 0 && G.czastki.length < 120)
+        G.czastki.push({x:Math.random()*W, y:-6, vx:(Math.random()-0.5)*1, vy:0.6+Math.random()*1.4,
+          zyc:240, kol:['#d82800','#f8d878','#58d854','#3cbcfc','#fe6ecc'][(Math.random()*5)|0], r:2+Math.random()*2});
+      aktualizujEfekty();
+      if(nowy('ArrowUp')){ G.czastki=[]; G.ekran='intro'; graj('muz_menu'); mow(bohater().glosStart); }
+      czyscNowe(); break;
+  }
+}
+function rysuj(){
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0,0,W,H);
+  switch(G.ekran){
+    case 'intro': rysujIntro(); break;
+    case 'karta': rysujKarte(); break;
+    case 'gra': rysujGre(); break;
+    case 'wstawanie': rysujWstawanie(); break;
+    case 'kredki': rysujKredki(); break;
+    case 'podloga': rysujPodloge(); break;
+    case 'cicho': rysujCicho(); break;
+    case 'koniec': rysujKoniec(); break;
+  }
+}
+// muzyka menu + powitanie startują po pierwszym geście gracza
+let powitano = false;
+function powitaj(){ if(powitano) return; powitano = true; graj('muz_menu'); mow(bohater().glosStart); }
+['keydown','pointerdown','touchstart'].forEach(z => addEventListener(z, powitaj, {once:false}));
+requestAnimationFrame(petla);
+
+/* ==================== PWA: przycisk „zainstaluj" ====================
+   Chrome sam nie pyta – chowa instalację w menu ⋮, a Safari na iPhonie w ogóle
+   jej nie proponuje. Dlatego gra ma własny przycisk: na Androidzie i na
+   komputerze otwiera prawdziwe okienko instalacji, a na iPhonie tłumaczy,
+   gdzie kliknąć. Przycisk pokazuje się tylko w menu, żeby nie zasłaniać gry. */
+const przyciskInstaluj = document.getElementById('instaluj');
+const okienkoJak = document.getElementById('jakInstalowac');
+let zachetaInstalacji = null;
+
+function juzZainstalowana(){
+  return matchMedia('(display-mode: standalone)').matches
+      || matchMedia('(display-mode: fullscreen)').matches
+      || navigator.standalone === true;
+}
+function pokazPrzyciskInstaluj(napisNaPrzycisku){
+  if(juzZainstalowana()) return;
+  przyciskInstaluj.textContent = napisNaPrzycisku;
+  document.body.classList.add('mozna');
+}
+const naIPhonie = /iPhone|iPad|iPod/.test(navigator.userAgent)
+               || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function tekstJakZainstalowac(){
+  if(naIPhonie) return 'Na iPhonie i iPadzie instaluje się ręcznie, w <b>Safari</b>:<br><br>' +
+    '1. dotknij <b>Udostępnij</b> (kwadracik ze strzałką w górę, na dole ekranu)<br>' +
+    '2. przewiń listę i wybierz <b>Do ekranu początkowego</b><br>' +
+    '3. potwierdź <b>Dodaj</b><br><br>' +
+    'Gra pojawi się jako ikona z Zuzią i będzie chodzić na pełnym ekranie.';
+  return 'Jeśli przeglądarka nie proponuje instalacji sama:<br><br>' +
+    '• <b>Android, Chrome:</b> menu <b>⋮</b> w prawym górnym rogu → <b>Zainstaluj aplikację</b> ' +
+    '(albo <b>Dodaj do ekranu głównego</b>)<br>' +
+    '• <b>Komputer, Chrome / Edge:</b> ikonka instalacji po prawej stronie paska adresu<br><br>' +
+    'Gdyby tego nie było, odśwież stronę – gra musi się raz wczytać do końca.';
+}
+przyciskInstaluj.addEventListener('click', async e => {
+  e.stopPropagation();
+  if(zachetaInstalacji){
+    try{
+      zachetaInstalacji.prompt();
+      const wybor = await zachetaInstalacji.userChoice.catch(() => null);
+      zachetaInstalacji = null;
+      if(wybor && wybor.outcome === 'accepted') document.body.classList.remove('mozna');
+      return;
+    }catch(err){
+      zachetaInstalacji = null;      // okienko się nie otworzyło – zostaje instrukcja
+    }
+  }
+  document.getElementById('jakTresc').innerHTML = tekstJakZainstalowac();
+  okienkoJak.classList.add('widac');
+});
+document.getElementById('zamknijJak').addEventListener('click', e => {
+  e.stopPropagation(); okienkoJak.classList.remove('widac');
+});
+addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  zachetaInstalacji = e;
+  pokazPrzyciskInstaluj('📲 ZAINSTALUJ GRĘ');
+});
+addEventListener('appinstalled', () => {
+  zachetaInstalacji = null;
+  document.body.classList.remove('mozna');
+});
+// iPhone nigdy nie da zachęty; na innych czekamy chwilę i też podpowiadamy ręcznie
+if(naIPhonie) pokazPrzyciskInstaluj('📲 JAK ZAINSTALOWAĆ?');
+else setTimeout(() => { if(!zachetaInstalacji) pokazPrzyciskInstaluj('📲 JAK ZAINSTALOWAĆ?'); }, 4000);
+
+/* ==================== PWA: zawsze świeża wersja ====================
+   Service worker trzyma grę offline, ale index.html bierze najpierw z sieci,
+   więc po każdym wejściu gra jest w najnowszej wersji. Gdy w tle pojawi się
+   nowa wersja, strona przeładowuje się sama (ale nigdy w środku zabawy). */
+if('serviceWorker' in navigator){
+  const bylJuzWorker = !!navigator.serviceWorker.controller;
+  let przeladowano = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if(!bylJuzWorker || przeladowano) return;   // pierwsza instalacja nie przeładowuje
+    przeladowano = true;
+    location.reload();
+  });
+  addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js', {scope:'./', updateViaCache:'none'}).then(rej => {
+      const sprawdz = () => { if(document.visibilityState === 'visible') rej.update().catch(()=>{}); };
+      addEventListener('visibilitychange', sprawdz);
+      setInterval(sprawdz, 15 * 60 * 1000);      // gra bywa włączona godzinami
+    }).catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>

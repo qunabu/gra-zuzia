@@ -1,0 +1,11 @@
+# klucze API – NIGDY do repozytorium
+.env
+
+# oryginalne zdjęcia (do gry trafiają tylko przerobione sprite'y)
+zdjecia/
+*.jpg
+*.jpeg
+*.JPG
+*.zip
+
+.DS_Store
