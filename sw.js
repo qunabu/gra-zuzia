@@ -5,12 +5,14 @@
 
    • index.html, manifest i sam sw.js  -> NAJPIERW SIEĆ (cache to tylko zapas
      na offline), więc po wejściu zawsze widać świeżą wersję gry;
-   • dźwięki i obrazki (mp3, png)      -> NAJPIERW CACHE, a w tle po cichu
+   • obrazki (png)                    -> NAJPIERW CACHE, a w tle po cichu
      pobiera się nowsza wersja pliku, żeby start był natychmiastowy;
+   • dźwięki (mp3)                    -> TYLKO CACHE (patrz komentarz przy
+     funkcji `dzwiek` – Safari i odświeżanie w tle zacinały grę);
    • nowy worker nie czeka w kolejce (skipWaiting + clients.claim), a strona
      sama się przeładuje, kiedy przejmie ją nowa wersja.                     */
 
-const WERSJA = '2026-08-19-zuzia-1';
+const WERSJA = '2026-09-08-iOS-plynnosc';
 const CACHE  = 'zuzia-' + WERSJA;
 
 /* to, co musi być dostępne offline od pierwszego uruchomienia */
@@ -79,6 +81,34 @@ function najpierwCache(zad){
   })();
 }
 
+/* Dźwięki (mp3) mają własną ścieżkę i to z dwóch powodów:
+
+   1. Safari pobiera media kawałkami (nagłówek Range), więc dostawaliśmy 206,
+      a 206 do Cache API wrzucić nie wolno – w efekcie na iPhonie mp3 NIGDY nie
+      trafiały do cache i każde odtworzenie szło do sieci. Dlatego przy chybieniu
+      pobieramy plik osobnym, pełnym żądaniem (bez Range) i to jego zapisujemy.
+   2. Nie ma tu odświeżania w tle: przy stukaniu ◀ ▶ gra prosiła o ten sam
+      dźwięk kilka razy na sekundę, a każde żądanie ciągnęło za sobą strzał do
+      sieci i zapis na dysk. O świeżość plików dba WERSJA cache'u – przy
+      aktywacji nowego workera stary cache i tak leci do kosza. */
+function dzwiek(zad){
+  return (async () => {
+    const c = await caches.open(CACHE);
+    const z = await c.match(zad, {ignoreVary:true});
+    if(z) return z;
+    // pełne żądanie: bez Range, więc odpowiedź ma 200 i wolno ją schować
+    const pelne = new Request(zad.url, {cache:'no-store'});
+    try{
+      const odp = await fetch(pelne);
+      if(odp && odp.status === 200 && odp.type !== 'opaque')
+        c.put(pelne, odp.clone()).catch(()=>{});
+      return odp;                    // <audio> radzi sobie z 200 zamiast 206
+    }catch(err){
+      return Response.error();
+    }
+  })();
+}
+
 self.addEventListener('fetch', e => {
   const zad = e.request;
   if(zad.method !== 'GET') return;
@@ -91,6 +121,10 @@ self.addEventListener('fetch', e => {
   }
   if(/\.(html|webmanifest|json)$/.test(url.pathname)){
     e.respondWith(najpierwSiec(zad));
+    return;
+  }
+  if(/\.mp3$/.test(url.pathname)){
+    e.respondWith(dzwiek(zad));
     return;
   }
   e.respondWith(najpierwCache(zad));

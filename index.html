@@ -17,10 +17,15 @@
 <style>
   html,body{margin:0;padding:0;height:100%;background:#0b0c14;overflow:hidden;
     font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;-webkit-user-select:none;user-select:none;}
-  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;}
+  /* Poświata siedzi na tle #wrap, a nie na kanwie: rozmyty box-shadow na
+     elemencie, którego treść zmienia się 60 razy na sekundę, Safari na iOS
+     rasteryzuje od nowa w KAŻDEJ ramce – i to w rozdzielczości ekranu.
+     Tło #wrap jest nieruchome, więc maluje się raz. */
+  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at center, #0b0c14 45%, #000000 100%);}
   canvas{width:min(100vw, calc(100vh * 16 / 9));height:auto;aspect-ratio:16/9;
     image-rendering:pixelated;image-rendering:crisp-edges;
-    box-shadow:0 0 0 4px #1a1c2c, 0 0 60px rgba(0,0,0,.8);touch-action:none;display:block;}
+    box-shadow:0 0 0 4px #1a1c2c;touch-action:none;display:block;}
   canvas:focus{outline:3px solid #f8d878;outline-offset:6px;}
   /* Przyciski dotykowe leżą na sztywnych pozycjach, bo w niektórych etapach
      ◀ i ▶ rozjeżdżają się do obu krawędzi – wtedy gra się dwoma kciukami. */
@@ -28,7 +33,9 @@
     --bw:78px; --pad:18px; --luz:12px;}
   #dotyk button{position:absolute;bottom:calc(var(--pad) - 4px);pointer-events:auto;
     width:var(--bw);height:var(--bw);border-radius:10px;border:3px solid #fffeff;
-    font-size:32px;color:#fffeff;background:rgba(0,0,0,.45);font-family:monospace;}
+    font-size:32px;color:#fffeff;background:rgba(0,0,0,.45);font-family:monospace;
+    /* bez tego iOS przy szybkim stukaniu czeka, czy to nie zoom na dwuklik */
+    touch-action:manipulation;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;}
   #dotyk button:active{background:rgba(248,216,120,.6);}
   body.dotyk #dotyk{display:block;}
   /* domyślnie: chodzenie po lewej pod jednym kciukiem, skok po prawej */
@@ -161,21 +168,48 @@ addEventListener('keydown', e => {
   if (e.key === 'o' || e.key === 'O') debugEtap(-1);
 });
 addEventListener('keyup', e => { if (KLAWISZE.includes(e.key)) { e.preventDefault(); klaw[e.key]=false; } });
-addEventListener('blur', () => KLAWISZE.forEach(k => klaw[k]=false));
+function puscKlawisze(){ KLAWISZE.forEach(k => { klaw[k]=false; klaw[k+'_nowy']=false; }); }
+addEventListener('blur', puscKlawisze);
+// iOS nie odpala „blur" niezawodnie – po schowaniu gry klawisz zostawał wciśnięty
+addEventListener('visibilitychange', () => { if(document.hidden) puscKlawisze(); });
+addEventListener('pagehide', puscKlawisze);
 function nowy(k){ if(klaw[k+'_nowy']){ klaw[k+'_nowy']=false; return true; } return false; }
 function czyscNowe(){ KLAWISZE.forEach(k => klaw[k+'_nowy']=false); }
 
 if ('ontouchstart' in window) {
   document.body.classList.add('dotyk');
+  /* Który palec trzyma który przycisk. Puszczenie łapiemy na OKNIE, a nie na
+     przycisku: przy zmianie etapu odswiezPrzyciski() chowa ▼ albo przerzuca
+     ◀ ▶ na drugą krawędź, a wtedy iOS nie wyśle już touchend do przycisku,
+     który zniknął pod palcem – i klawisz zostawał wciśnięty na zawsze. */
+  const palce = new Map();               // identifier -> klawisz
+  const wcisnij = k => { if(!klaw[k]) klaw[k+'_nowy']=true; klaw[k]=true; };
+  const jeszczeTrzyma = k => { for(const v of palce.values()) if(v === k) return true; return false; };
   document.querySelectorAll('#dotyk button').forEach(b => {
     const k = b.dataset.k;
-    const on = e => { e.preventDefault(); if(!klaw[k]) klaw[k+'_nowy']=true; klaw[k]=true; odblokujDzwiek();
-                      if(k === 'ArrowUp') pelnyEkranPrzyWyborze(); };
-    const off = e => { e.preventDefault(); klaw[k]=false; };
-    b.addEventListener('touchstart', on, {passive:false}); b.addEventListener('touchend', off);
-    b.addEventListener('touchcancel', off); b.addEventListener('mousedown', on);
-    b.addEventListener('mouseup', off); b.addEventListener('mouseleave', off);
+    const start = () => { wcisnij(k); odblokujDzwiek();
+                          if(k === 'ArrowUp') pelnyEkranPrzyWyborze(); };
+    b.addEventListener('touchstart', e => {
+      e.preventDefault();                // przy okazji zabija zoom na dwuklik
+      const zm = e.changedTouches;
+      for(let i=0;i<zm.length;i++) palce.set(zm[i].identifier, k);
+      start();
+    }, {passive:false});
+    b.addEventListener('mousedown', e => { e.preventDefault(); start(); });
+    b.addEventListener('mouseup', () => { klaw[k]=false; });
+    b.addEventListener('mouseleave', () => { klaw[k]=false; });
   });
+  const koniecDotyku = e => {
+    const zm = e.changedTouches;
+    for(let i=0;i<zm.length;i++){
+      const k = palce.get(zm[i].identifier);
+      if(k === undefined) continue;
+      palce.delete(zm[i].identifier);
+      if(!jeszczeTrzyma(k)) klaw[k]=false;
+    }
+  };
+  addEventListener('touchend', koniecDotyku, {passive:true});
+  addEventListener('touchcancel', koniecDotyku, {passive:true});
 }
 function klikniecieWPlansze(e){
   odblokujDzwiek(); cv.focus();
@@ -244,6 +278,7 @@ function odblokujDzwiek(){
   if(!AC){ try{ AC = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
   if(AC && AC.state === 'suspended') AC.resume();
   dzwiekOdblokowany = true;
+  wczytajProbki();
 }
 function ton(f, dl, typ='square', gl=0.06, op=0){
   if(!AC || !dzwiekWlaczony) return;
@@ -265,19 +300,47 @@ const ZAPAS = {                       // awaryjne chiptune'y
   sfx_hau(){ ton(300,0.09,'square',0.06); ton(220,0.14,'square',0.06,0.09); }
 };
 const KLUCZE_SFX = ['sfx_skok','sfx_zbierz','sfx_sukces','sfx_zle','sfx_bum','sfx_drzwi','sfx_hau'];
+
+/* Efekty lecą przez WebAudio: każdy plik dekodujemy RAZ do pamięci i potem
+   odtwarzamy z bufora. Wcześniej każde naciśnięcie strzałki robiło
+   `cloneNode()` na elemencie <audio>, czyli nowy element medialny i nowe
+   pobranie pliku. W etapach ze stukaniem ◀ ▶ to 6-10 elementów na sekundę –
+   Safari na iPhonie trzyma dla każdego osobny dekoder, zwalnia je z
+   opóźnieniem i po kilkunastu sekundach gra przystawała. */
+const probki = {};                    // klucz -> AudioBuffer
+const stanProbki = {};                // klucz -> 'laduje' | 'ok' | 'nie'
+function wczytajProbke(klucz){
+  if(!AC || stanProbki[klucz]) return;
+  const src = zrodlo(klucz);
+  if(!src){ stanProbki[klucz] = 'nie'; return; }
+  stanProbki[klucz] = 'laduje';
+  fetch(src)
+    .then(o => o.ok ? o.arrayBuffer() : Promise.reject(o.status))
+    .then(dane => new Promise((ok, zle) => {
+      // Safari długo nie miało wersji decodeAudioData na obietnicach
+      const p = AC.decodeAudioData(dane, ok, zle);
+      if(p && p.then) p.then(ok, zle);
+    }))
+    .then(buf => { probki[klucz] = buf; stanProbki[klucz] = 'ok'; })
+    .catch(() => { stanProbki[klucz] = 'nie'; });
+}
+function wczytajProbki(){ KLUCZE_SFX.forEach(wczytajProbke); }
 function sfx(klucz){
   if(!dzwiekWlaczony) return;
-  const wzor = bufory[klucz];
-  const zapas = () => { if(ZAPAS[klucz]) ZAPAS[klucz](); };
-  if(!wzor || gotowe[klucz] === false){ zapas(); return; }
-  const k = wzor.cloneNode();
-  k.volume = GLOSNOSC_EFEKTOW;
-  const p = k.play();
-  if(p && p.catch) p.catch(zapas);       // plik jeszcze się ładuje -> piszczyk z WebAudio
+  const buf = probki[klucz];
+  if(AC && buf){
+    const z = AC.createBufferSource(), g = AC.createGain();
+    z.buffer = buf; g.gain.value = GLOSNOSC_EFEKTOW;
+    z.connect(g); g.connect(AC.destination);
+    z.start();
+    return;                            // węzeł zwalnia się sam po odtworzeniu
+  }
+  wczytajProbke(klucz);                // jeszcze się dekoduje – dociągnij i piszcz
+  if(ZAPAS[klucz]) ZAPAS[klucz]();
 }
 
 /* --- narrator (mali gracze jeszcze nie czytają, więc wszystko jest mówione) --- */
-let mowaTeraz = null, kolejkaMowy = [];
+let mowaTeraz = null, kolejkaMowy = [], mowaNr = 0;
 function mow(...klucze){
   if(!dzwiekWlaczony) return;
   kolejkaMowy = klucze.filter(Boolean);
@@ -288,22 +351,33 @@ function dopowiedz(klucz){
   kolejkaMowy.push(klucz);
   if(!mowaTeraz) nastepnaMowa(false);
 }
+/* Narrator gada zawsze pojedynczo, więc odtwarzamy wprost element-wzorzec
+   (przewinięty na początek) zamiast klonować go za każdym razem – klon to na
+   iOS kolejny element medialny i kolejne pobranie tego samego pliku.
+   `mowaNr` pilnuje, żeby zdarzenie z przerwanej kwestii nie ruszyło kolejki. */
 function nastepnaMowa(przerwij){
-  if(przerwij && mowaTeraz){ try{ mowaTeraz.pause(); mowaTeraz.currentTime = 0; }catch(e){} mowaTeraz = null; }
+  if(przerwij && mowaTeraz){
+    mowaNr++;
+    try{ mowaTeraz.pause(); mowaTeraz.currentTime = 0; }catch(e){}
+    mowaTeraz = null;
+  }
   if(mowaTeraz) return;
   const k = kolejkaMowy.shift();
   if(!k) return;
-  const wzor = bufory[k];
-  if(!wzor || gotowe[k] === false){ nastepnaMowa(false); return; }
-  const a = wzor.cloneNode();
+  const a = bufory[k];
+  if(!a || gotowe[k] === false){ nastepnaMowa(false); return; }
+  const nr = ++mowaNr;
+  const dalej = () => { if(nr !== mowaNr) return; mowaTeraz = null; nastepnaMowa(false); };
   a.volume = GLOSNOSC_NARRATORA;
-  a.addEventListener('ended', () => { mowaTeraz = null; nastepnaMowa(false); });
-  a.addEventListener('error', () => { mowaTeraz = null; nastepnaMowa(false); });
+  try{ a.currentTime = 0; }catch(e){}
+  a.onended = dalej; a.onerror = dalej;   // pola, nie addEventListener – nie narastają
   mowaTeraz = a;
-  a.play().catch(() => { mowaTeraz = null; nastepnaMowa(false); });
+  const p = a.play();
+  if(p && p.catch) p.catch(dalej);
 }
 function cisza(){
   kolejkaMowy = [];
+  mowaNr++;
   if(mowaTeraz){ try{ mowaTeraz.pause(); }catch(e){} mowaTeraz = null; }
 }
 
@@ -349,8 +423,8 @@ const KLUCZE_MOWA = [
   'brawo1','brawo2','brawo3','brawo4','zle'];
 
 KLUCZE_MUZ.forEach(k => wczytajAudio(k, GLOSNOSC_MUZYKI, true));
-KLUCZE_SFX.forEach(k => wczytajAudio(k, GLOSNOSC_EFEKTOW, false));
 KLUCZE_MOWA.forEach(k => wczytajAudio(k, GLOSNOSC_NARRATORA, false));
+// efekty nie potrzebują elementów <audio> – siedzą w pamięci jako próbki WebAudio
 
 document.getElementById('glosnik').addEventListener('click', e => {
   e.stopPropagation();
@@ -1240,36 +1314,47 @@ function glif(zn){
   if(z) return {rzedy: CZC[z[0]], gora:z[1], dol:z[2]};
   return {rzedy: CZC['?'], gora:null, dol:null};
 }
-const pamiecTekstu = new Map();
-function tekstNaKanwie(t, kol){
-  const klucz = t + ' ' + kol;
-  if(pamiecTekstu.has(klucz)) return pamiecTekstu.get(klucz);
-  const znaki = [...t];
-  const c = document.createElement('canvas');
-  c.width = Math.max(1, znaki.length * 6); c.height = 9;
+/* Kanwa na POJEDYNCZY znak, nie na cały napis. Wcześniej cache siedział pod
+   kluczem „tekst + kolor", więc napisy z licznikiem (procenty, zegary)
+   tworzyły nową kanwę w KAŻDEJ ramce – z cieniem dwie – czyli ponad sto kanw
+   na sekundę, aż cache dobijał 400 i czyścił się do zera. Safari na iOS
+   najgorzej znosi właśnie masowe tworzenie kanw i to ono krztusiło grę.
+   Znaków jest kilkadziesiąt, a kolorów kilkanaście, więc teraz cache po
+   chwili przestaje rosnąć. */
+const pamiecGlifow = new Map();
+function glifNaKanwie(zn, kol){
+  const klucz = zn + ' ' + kol;
+  let c = pamiecGlifow.get(klucz);
+  if(c) return c;
+  c = document.createElement('canvas');
+  c.width = 5; c.height = 9;
   const x = c.getContext('2d');
   x.fillStyle = kol;
-  znaki.forEach((zn, i) => {
-    const g = glif(zn), ox = i*6;
-    if(g.gora) for(let k=0;k<5;k++) if(g.gora[k]==='#') x.fillRect(ox+k, 0, 1, 1);
-    for(let j=0;j<7;j++) for(let k=0;k<5;k++)
-      if(g.rzedy[j][k]==='#') x.fillRect(ox+k, 1+j, 1, 1);
-    if(g.dol) for(let k=0;k<5;k++) if(g.dol[k]==='#') x.fillRect(ox+k, 8, 1, 1);
-  });
-  if(pamiecTekstu.size > 400) pamiecTekstu.clear();
-  pamiecTekstu.set(klucz, c);
+  const g = glif(zn);
+  if(g.gora) for(let k=0;k<5;k++) if(g.gora[k]==='#') x.fillRect(k, 0, 1, 1);
+  for(let j=0;j<7;j++) for(let k=0;k<5;k++)
+    if(g.rzedy[j][k]==='#') x.fillRect(k, 1+j, 1, 1);
+  if(g.dol) for(let k=0;k<5;k++) if(g.dol[k]==='#') x.fillRect(k, 8, 1, 1);
+  pamiecGlifow.set(klucz, c);
   return c;
 }
 function szerTekstu(t, skala){ return [...t].length * 6 * (skala||1); }
+function rysujZnaki(znaki, px, py, kol, skala){
+  const sw = 5*skala, sh = 9*skala, krok = 6*skala;
+  for(let i=0;i<znaki.length;i++){
+    if(znaki[i] === ' ') continue;                 // spacja to pusty glif
+    ctx.drawImage(glifNaKanwie(znaki[i], kol), px + i*krok, py, sw, sh);
+  }
+}
 function rysujTekst(t, x, y, kol, cien, skala, wyr){
   skala = Math.max(1, Math.round(skala || 1));
-  const c = tekstNaKanwie(t, kol);
-  const w = c.width*skala, h = c.height*skala;
+  const znaki = [...t];
+  const w = znaki.length*6*skala, h = 9*skala;
   let px = Math.round(x), py = Math.round(y - h/2);
   if(wyr === 'center') px = Math.round(x - w/2);
   ctx.imageSmoothingEnabled = false;
-  if(cien) ctx.drawImage(tekstNaKanwie(t, cien), px+skala, py+skala, w, h);
-  ctx.drawImage(c, px, py, w, h);
+  if(cien) rysujZnaki(znaki, px+skala, py+skala, cien, skala);
+  rysujZnaki(znaki, px, py, kol, skala);
 }
 function napis(t, x, y, kol, cien, skala){ rysujTekst(t, x, y, kol, cien, skala, 'center'); }
 function napisL(t, x, y, kol, cien, skala){ rysujTekst(t, x, y, kol, cien, skala, 'left'); }
